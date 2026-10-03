@@ -51,8 +51,30 @@ spring:
               - profile
               - email
 
+  # Spring Mail Configuration
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${MAIL_AUTH:true}
+          starttls:
+            enable: ${MAIL_STARTTLS_ENABLE:true}
+            required: ${MAIL_STARTTLS_REQUIRED:false}
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+
 # Security & JWT Configuration
 application:
+  mail:
+    frontend-url: ${APP_FRONTEND_URL:http://localhost:3000}
+    from: ${MAIL_FROM:noreply@expensetracker.com}
+    verification-expiration-minutes: ${EMAIL_VERIFICATION_EXPIRATION_MINUTES:30}
+    resend-cooldown-seconds: ${EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS:60}
   oauth2:
     authorized-redirect-uri: ${OAUTH2_REDIRECT_URI:http://localhost:3000/oauth2/callback}
     failure-redirect-uri: ${OAUTH2_FAILURE_REDIRECT_URI:http://localhost:3000/login?error=oauth_failed}

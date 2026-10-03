@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation } from '@tanstack/react-query';
-import { Eye, EyeOff, AlertCircle } from 'lucide-react';
+import { Eye, EyeOff, AlertCircle, Mail, ArrowRight } from 'lucide-react';
 import { Card, Button, Input } from '../components/ui';
 import { authApi, getGoogleAuthUrl } from '../services/api/authApi';
 import { useToast } from '../components/ui/Toast';
@@ -63,6 +63,9 @@ export const RegisterPage: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [registeredEmail, setRegisteredEmail] = useState<string | null>(null);
+  const [isResending, setIsResending] = useState(false);
+  const [resendStatusMsg, setResendStatusMsg] = useState<string | null>(null);
 
   const {
     register,
@@ -84,9 +87,9 @@ export const RegisterPage: React.FC = () => {
       const response = await authApi.register(payload);
       return response.data;
     },
-    onSuccess: () => {
-      showToast('success', 'Account created successfully!', 'Please sign in with your credentials.');
-      navigate('/login');
+    onSuccess: (_, variables) => {
+      setRegisteredEmail(variables.email);
+      showToast('success', 'Account created!', 'Please check your email to verify your account.');
     },
     onError: (error: unknown) => {
       const parsed = parseApiError(error, 'Registration failed. Please try again.');
@@ -97,6 +100,7 @@ export const RegisterPage: React.FC = () => {
 
   const onSubmit = (data: RegisterFormData) => {
     setErrorMessage(null);
+    setResendStatusMsg(null);
     registerMutation.mutate({
       name: data.name,
       email: data.email,
@@ -104,10 +108,74 @@ export const RegisterPage: React.FC = () => {
     });
   };
 
+  const handleResend = async () => {
+    if (!registeredEmail) return;
+    setIsResending(true);
+    setResendStatusMsg(null);
+    try {
+      const res = await authApi.resendVerification(registeredEmail);
+      setResendStatusMsg(res.message || 'Verification email resent! Please check your inbox.');
+      showToast('success', 'Email Sent', 'A fresh verification link has been sent.');
+    } catch (err) {
+      const parsed = parseApiError(err, 'Failed to resend verification email.');
+      setResendStatusMsg(parsed.message);
+      showToast('error', 'Resend Failed', parsed.message);
+    } finally {
+      setIsResending(false);
+    }
+  };
+
   const handleGoogleLogin = () => {
     setErrorMessage(null);
     window.location.href = getGoogleAuthUrl();
   };
+
+  if (registeredEmail) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center p-4">
+        <div className="w-full max-w-[420px]">
+          <Card className="bg-white border-border shadow-card p-6 sm:p-8 text-center space-y-6">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 mx-auto">
+              <Mail className="w-7 h-7 text-emerald-600" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-ink">Check your email</h1>
+              <p className="text-sm text-muted mt-2 leading-relaxed">
+                We've sent a verification link to <strong className="text-ink font-semibold">{registeredEmail}</strong>. Please click the link to activate your account.
+              </p>
+            </div>
+
+            {resendStatusMsg && (
+              <div className="p-3 rounded-lg bg-surface border border-border text-xs text-muted">
+                {resendStatusMsg}
+              </div>
+            )}
+
+            <div className="space-y-3 pt-2">
+              <Button
+                type="button"
+                variant="primary"
+                className="w-full h-11 text-sm font-semibold flex items-center justify-center gap-2"
+                onClick={() => navigate('/login')}
+              >
+                <span>Go to Login</span>
+                <ArrowRight className="w-4 h-4" />
+              </Button>
+
+              <button
+                type="button"
+                onClick={handleResend}
+                disabled={isResending}
+                className="text-xs font-semibold text-accent-end hover:underline focus:outline-none transition-colors"
+              >
+                {isResending ? 'Resending...' : "Didn't receive the email? Resend"}
+              </button>
+            </div>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-white flex items-center justify-center p-4">

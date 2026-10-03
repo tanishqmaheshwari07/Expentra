@@ -80,6 +80,7 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
                 .providerId(sub)
                 .role(Role.ROLE_USER)
                 .isActive(true)
+                .emailVerified(true)
                 .password(null)
                 .build();
 

@@ -119,6 +119,26 @@ export const authApi = {
     const res = await apiClient.delete<ApiResponse<void>>(`/users/${id}`);
     return res.data;
   },
+
+  /**
+   * Verify email address with single-use token
+   * GET /api/users/verify-email?token=...
+   */
+  verifyEmail: async (token: string): Promise<ApiResponse<void>> => {
+    const res = await apiClient.get<ApiResponse<void>>('/users/verify-email', {
+      params: { token },
+    });
+    return res.data;
+  },
+
+  /**
+   * Resend verification email
+   * POST /api/users/resend-verification
+   */
+  resendVerification: async (email: string): Promise<ApiResponse<void>> => {
+    const res = await apiClient.post<ApiResponse<void>>('/users/resend-verification', { email });
+    return res.data;
+  },
 };
 
 /**

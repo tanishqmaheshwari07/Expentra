@@ -33,8 +33,12 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 import com.example.expensetracker.dto.OAuth2ExchangeRequest;
+import com.example.expensetracker.dto.ResendVerificationRequest;
+import com.example.expensetracker.entity.AuthProvider;
+import com.example.expensetracker.exception.EmailNotVerifiedException;
 import com.example.expensetracker.exception.UnauthorizedAccessException;
 import com.example.expensetracker.security.oauth2.OAuth2ExchangeCodeService;
+import org.mockito.ArgumentCaptor;
 
 @ExtendWith(MockitoExtension.class)
 class UserServiceTest {
@@ -57,6 +61,12 @@ class UserServiceTest {
     @Mock
     private OAuth2ExchangeCodeService exchangeCodeService;
 
+    @Mock
+    private EmailVerificationTokenService emailVerificationTokenService;
+
+    @Mock
+    private EmailService emailService;
+
     @InjectMocks
     private UserService userService;
 
@@ -70,8 +80,10 @@ class UserServiceTest {
                 .name("Alex Doe")
                 .email("alex@example.com")
                 .password("encodedPassword123")
+                .authProvider(AuthProvider.LOCAL)
                 .role(Role.ROLE_USER)
                 .isActive(true)
+                .emailVerified(true)
                 .build();
 
         userRequest = new UserRequest();
@@ -81,11 +93,12 @@ class UserServiceTest {
     }
 
     @Test
-    @DisplayName("Should successfully register a new user")
+    @DisplayName("Should successfully register a new user with unverified email and send verification email")
     void createUser_Success() {
         when(userRepository.findByEmail("alex@example.com")).thenReturn(Optional.empty());
         when(passwordEncoder.encode("rawPassword123")).thenReturn("encodedPassword123");
         when(userRepository.save(any(User.class))).thenReturn(testUser);
+        when(emailVerificationTokenService.createVerificationToken(any(User.class))).thenReturn("raw-test-token-123");
 
         UserResponse response = userService.createUser(userRequest);
 
@@ -93,7 +106,15 @@ class UserServiceTest {
         assertThat(response.getId()).isEqualTo(1L);
         assertThat(response.getEmail()).isEqualTo("alex@example.com");
         assertThat(response.getRole()).isEqualTo(Role.ROLE_USER);
-        verify(userRepository, times(1)).save(any(User.class));
+
+        ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+        verify(userRepository, times(1)).save(userCaptor.capture());
+        User captured = userCaptor.getValue();
+        assertThat(captured.isEmailVerified()).isFalse();
+        assertThat(captured.getAuthProvider()).isEqualTo(AuthProvider.LOCAL);
+
+        verify(emailVerificationTokenService, times(1)).createVerificationToken(testUser);
+        verify(emailService, times(1)).sendVerificationEmail("alex@example.com", "Alex Doe", "raw-test-token-123");
     }
 
     @Test
@@ -294,5 +315,130 @@ class UserServiceTest {
         assertThatThrownBy(() -> userService.exchangeOAuth2Code(request))
                 .isInstanceOf(UnauthorizedAccessException.class)
                 .hasMessageContaining("Account is disabled");
+    }
+
+    @Test
+    @DisplayName("Local user with unverified email cannot login - throws EmailNotVerifiedException")
+    void login_UnverifiedLocalUser_ThrowsEmailNotVerifiedException() {
+        User unverifiedUser = User.builder()
+                .id(3L)
+                .name("Unverified Local User")
+                .email("unverified@example.com")
+                .password("encodedPassword123")
+                .authProvider(AuthProvider.LOCAL)
+                .role(Role.ROLE_USER)
+                .isActive(true)
+                .emailVerified(false)
+                .build();
+
+        LoginRequest loginRequest = new LoginRequest();
+        loginRequest.setEmail("unverified@example.com");
+        loginRequest.setPassword("rawPassword123");
+
+        when(userRepository.findByEmail("unverified@example.com")).thenReturn(Optional.of(unverifiedUser));
+        when(passwordEncoder.matches("rawPassword123", "encodedPassword123")).thenReturn(true);
+
+        assertThatThrownBy(() -> userService.login(loginRequest))
+                .isInstanceOf(EmailNotVerifiedException.class)
+                .hasMessageContaining("EMAIL_NOT_VERIFIED");
+    }
+
+    @Test
+    @DisplayName("verifyEmail calls EmailVerificationTokenService.verifyToken")
+    void verifyEmail_CallsTokenService() {
+        userService.verifyEmail("raw-token-abc-123");
+        verify(emailVerificationTokenService, times(1)).verifyToken("raw-token-abc-123");
+    }
+
+    @Test
+    @DisplayName("resendVerificationEmail for eligible unverified local user creates token and sends email")
+    void resendVerificationEmail_EligibleUser_Success() {
+        User unverifiedUser = User.builder()
+                .id(4L)
+                .name("Unverified User")
+                .email("pending@example.com")
+                .authProvider(AuthProvider.LOCAL)
+                .role(Role.ROLE_USER)
+                .isActive(true)
+                .emailVerified(false)
+                .build();
+
+        when(userRepository.findByEmail("pending@example.com")).thenReturn(Optional.of(unverifiedUser));
+        when(emailVerificationTokenService.createResendVerificationToken(unverifiedUser)).thenReturn("new-raw-token-456");
+
+        ResendVerificationRequest request = ResendVerificationRequest.builder()
+                .email("pending@example.com")
+                .build();
+
+        userService.resendVerificationEmail(request);
+
+        verify(emailVerificationTokenService, times(1)).createResendVerificationToken(unverifiedUser);
+        verify(emailService, times(1)).sendVerificationEmail("pending@example.com", "Unverified User", "new-raw-token-456");
+    }
+
+    @Test
+    @DisplayName("resendVerificationEmail for already verified user does not generate token or send email")
+    void resendVerificationEmail_AlreadyVerifiedUser_Ignored() {
+        User verifiedUser = User.builder()
+                .id(5L)
+                .name("Verified User")
+                .email("verified@example.com")
+                .authProvider(AuthProvider.LOCAL)
+                .role(Role.ROLE_USER)
+                .isActive(true)
+                .emailVerified(true)
+                .build();
+
+        when(userRepository.findByEmail("verified@example.com")).thenReturn(Optional.of(verifiedUser));
+
+        ResendVerificationRequest request = ResendVerificationRequest.builder()
+                .email("verified@example.com")
+                .build();
+
+        userService.resendVerificationEmail(request);
+
+        verify(emailVerificationTokenService, never()).createResendVerificationToken(any(User.class));
+        verify(emailService, never()).sendVerificationEmail(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("resendVerificationEmail for Google OAuth user does not generate token or send email")
+    void resendVerificationEmail_GoogleUser_Ignored() {
+        User googleUser = User.builder()
+                .id(6L)
+                .name("Google User")
+                .email("google@example.com")
+                .authProvider(AuthProvider.GOOGLE)
+                .providerId("google-id-6")
+                .role(Role.ROLE_USER)
+                .isActive(true)
+                .emailVerified(true)
+                .build();
+
+        when(userRepository.findByEmail("google@example.com")).thenReturn(Optional.of(googleUser));
+
+        ResendVerificationRequest request = ResendVerificationRequest.builder()
+                .email("google@example.com")
+                .build();
+
+        userService.resendVerificationEmail(request);
+
+        verify(emailVerificationTokenService, never()).createResendVerificationToken(any(User.class));
+        verify(emailService, never()).sendVerificationEmail(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("resendVerificationEmail for non-existent email ignores silently to prevent enumeration")
+    void resendVerificationEmail_NonExistentUser_IgnoredSilently() {
+        when(userRepository.findByEmail("ghost@example.com")).thenReturn(Optional.empty());
+
+        ResendVerificationRequest request = ResendVerificationRequest.builder()
+                .email("ghost@example.com")
+                .build();
+
+        userService.resendVerificationEmail(request);
+
+        verify(emailVerificationTokenService, never()).createResendVerificationToken(any(User.class));
+        verify(emailService, never()).sendVerificationEmail(anyString(), anyString(), anyString());
     }
 }

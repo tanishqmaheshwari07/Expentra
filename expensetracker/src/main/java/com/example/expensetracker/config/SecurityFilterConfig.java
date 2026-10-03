@@ -54,7 +54,7 @@ public class SecurityFilterConfig {
                         })
                 )
                 .authorizeHttpRequests(auth -> auth
-                        // Auth & User Registration & OAuth2 exchange endpoints
+                        // Auth & User Registration & OAuth2 exchange & Email Verification endpoints
                         .requestMatchers(HttpMethod.POST,
                                 "/api/users",
                                 "/api/users/register",
@@ -62,7 +62,11 @@ public class SecurityFilterConfig {
                                 "/api/users/refresh-token",
                                 "/api/users/logout",
                                 "/api/users/oauth2/exchange",
+                                "/api/users/resend-verification",
                                 "/api/login"
+                        ).permitAll()
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/users/verify-email"
                         ).permitAll()
                         // OAuth2 Authorization & Callback endpoints
                         .requestMatchers(

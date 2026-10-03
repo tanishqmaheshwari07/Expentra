@@ -118,6 +118,7 @@ class OAuth2AuthenticationTest {
         User captured = userCaptor.getValue();
         assertThat(captured.getAuthProvider()).isEqualTo(AuthProvider.GOOGLE);
         assertThat(captured.getProviderId()).isEqualTo("google-sub-12345");
+        assertThat(captured.isEmailVerified()).isTrue();
         assertThat(captured.getPassword()).isNull();
     }
 

@@ -53,6 +53,10 @@ export const LoginPage: React.FC = () => {
 
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isUnverified, setIsUnverified] = useState(false);
+  const [unverifiedEmail, setUnverifiedEmail] = useState('');
+  const [isResending, setIsResending] = useState(false);
+  const [resendSuccessMsg, setResendSuccessMsg] = useState<string | null>(null);
 
   // Check and display error query parameters returned from OAuth redirect
   useEffect(() => {
@@ -79,6 +83,7 @@ export const LoginPage: React.FC = () => {
     register,
     handleSubmit,
     setValue,
+    getValues,
     setError,
     formState: { errors },
   } = useForm<LoginFormData>({
@@ -106,13 +111,44 @@ export const LoginPage: React.FC = () => {
     },
     onError: (error: unknown) => {
       const parsed = parseApiError(error, 'Sign in failed. Please check your credentials and try again.');
-      setErrorMessage(parsed.message);
+      if (parsed.message.includes('EMAIL_NOT_VERIFIED')) {
+        setIsUnverified(true);
+        setUnverifiedEmail(getValues('email'));
+        setErrorMessage('Please verify your email before logging in.');
+      } else {
+        setIsUnverified(false);
+        setErrorMessage(parsed.message);
+      }
       applyServerFieldErrors(error, setError);
     },
   });
 
+  const handleResendFromLogin = async () => {
+    const emailToUse = unverifiedEmail || getValues('email');
+    if (!emailToUse || !emailToUse.includes('@')) {
+      showToast('error', 'Error', 'Please enter your email address to resend verification.');
+      return;
+    }
+
+    setIsResending(true);
+    setResendSuccessMsg(null);
+
+    try {
+      const res = await authApi.resendVerification(emailToUse.trim());
+      setResendSuccessMsg(res.message || 'Verification email sent. Please check your inbox.');
+      showToast('success', 'Email Sent', 'A fresh verification link has been sent to your inbox.');
+    } catch (err) {
+      const parsed = parseApiError(err, 'Failed to resend verification email.');
+      showToast('error', 'Resend Failed', parsed.message);
+    } finally {
+      setIsResending(false);
+    }
+  };
+
   const onSubmit = (formData: LoginFormData) => {
     setErrorMessage(null);
+    setIsUnverified(false);
+    setResendSuccessMsg(null);
     loginMutation.mutate(formData);
   };
 
@@ -120,10 +156,12 @@ export const LoginPage: React.FC = () => {
     setValue('email', 'alex.morgan@example.com');
     setValue('password', 'Password123!');
     setErrorMessage(null);
+    setIsUnverified(false);
   };
 
   const handleGoogleLogin = () => {
     setErrorMessage(null);
+    setIsUnverified(false);
     window.location.href = getGoogleAuthUrl();
   };
 
@@ -137,11 +175,32 @@ export const LoginPage: React.FC = () => {
             <p className="text-sm text-muted mt-1">Access your expense tracker account</p>
           </div>
 
-          {/* Red banner on 401 / error */}
+          {/* Error Banner */}
           {errorMessage && (
-            <div className="mb-4 p-3 rounded-lg bg-red-50 border border-danger/20 flex items-center gap-2.5 text-danger text-sm font-medium animate-fadeIn">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{errorMessage}</span>
+            <div className="mb-4 p-3.5 rounded-lg bg-red-50 border border-danger/20 text-danger text-sm font-medium animate-fadeIn">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <span>{errorMessage}</span>
+                  {isUnverified && (
+                    <div className="mt-2.5 pt-2 border-t border-danger/10">
+                      <button
+                        type="button"
+                        onClick={handleResendFromLogin}
+                        disabled={isResending}
+                        className="text-xs font-semibold text-accent-end hover:underline focus:outline-none flex items-center gap-1.5"
+                      >
+                        {isResending ? 'Sending email...' : 'Resend verification email'}
+                      </button>
+                      {resendSuccessMsg && (
+                        <p className="text-xs text-emerald-700 mt-1 font-normal">
+                          {resendSuccessMsg}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 

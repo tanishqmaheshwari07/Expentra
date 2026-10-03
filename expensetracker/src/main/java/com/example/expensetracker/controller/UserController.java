@@ -8,6 +8,7 @@ import com.example.expensetracker.dto.OAuth2ExchangeRequest;
 import com.example.expensetracker.dto.PasswordUpdateRequest;
 import com.example.expensetracker.dto.ProfileUpdateRequest;
 import com.example.expensetracker.dto.RefreshTokenRequest;
+import com.example.expensetracker.dto.ResendVerificationRequest;
 import com.example.expensetracker.dto.RoleUpdateRequest;
 import com.example.expensetracker.dto.UserRequest;
 import com.example.expensetracker.dto.UserResponse;
@@ -53,7 +54,23 @@ public class UserController {
             @Valid @RequestBody UserRequest userRequest) {
         UserResponse response = userService.createUser(userRequest);
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.ok(response, "User registered successfully"));
+                .body(ApiResponse.ok(response, "User registered successfully. Please check your email to verify your account."));
+    }
+
+    @Operation(summary = "Verify email address", description = "Verifies user account using the single-use token sent via email")
+    @GetMapping("/verify-email")
+    public ResponseEntity<ApiResponse<Void>> verifyEmail(
+            @RequestParam("token") String token) {
+        userService.verifyEmail(token);
+        return ResponseEntity.ok(ApiResponse.ok(null, "Email verified successfully. You can now log in."));
+    }
+
+    @Operation(summary = "Resend verification email", description = "Sends a new verification email if account is unverified and cooldown has elapsed")
+    @PostMapping("/resend-verification")
+    public ResponseEntity<ApiResponse<Void>> resendVerification(
+            @Valid @RequestBody ResendVerificationRequest request) {
+        userService.resendVerificationEmail(request);
+        return ResponseEntity.ok(ApiResponse.ok(null, "If an unverified account with this email exists, a verification email has been sent."));
     }
 
     @Operation(summary = "Authenticate user", description = "Authenticates user credentials, sets HttpOnly refresh cookie, and returns access token")

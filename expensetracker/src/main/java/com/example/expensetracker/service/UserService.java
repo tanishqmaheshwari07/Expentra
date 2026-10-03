@@ -9,9 +9,12 @@ import com.example.expensetracker.dto.ProfileUpdateRequest;
 import com.example.expensetracker.dto.RefreshTokenRequest;
 import com.example.expensetracker.dto.UserRequest;
 import com.example.expensetracker.dto.UserResponse;
+import com.example.expensetracker.dto.ResendVerificationRequest;
+import com.example.expensetracker.entity.AuthProvider;
 import com.example.expensetracker.entity.RefreshToken;
 import com.example.expensetracker.entity.Role;
 import com.example.expensetracker.entity.User;
+import com.example.expensetracker.exception.EmailNotVerifiedException;
 import com.example.expensetracker.exception.UnauthorizedAccessException;
 import com.example.expensetracker.exception.UserAlreadyExistsException;
 import com.example.expensetracker.exception.UserNotFoundException;
@@ -34,6 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -49,27 +53,38 @@ public class UserService {
     private final JwtService jwtService;
     private final JwtProperties jwtProperties;
     private final OAuth2ExchangeCodeService exchangeCodeService;
+    private final EmailVerificationTokenService emailVerificationTokenService;
+    private final EmailService emailService;
 
     public UserResponse createUser(UserRequest userRequest) {
-        if (userRepository.findByEmail(userRequest.getEmail()).isPresent()) {
+        String normalizedEmail = userRequest.getEmail().trim().toLowerCase();
+        if (userRepository.findByEmail(normalizedEmail).isPresent()) {
             throw new UserAlreadyExistsException("User with email " + userRequest.getEmail() + " already exists");
         }
 
         User user = User.builder()
-                .name(userRequest.getName())
-                .email(userRequest.getEmail())
+                .name(userRequest.getName().trim())
+                .email(normalizedEmail)
                 .password(passwordEncoder.encode(userRequest.getPassword()))
+                .authProvider(AuthProvider.LOCAL)
                 .role(Role.ROLE_USER)
                 .isActive(true)
+                .emailVerified(false)
                 .build();
 
         User savedUser = userRepository.save(user);
-        log.info("Registered new user with ID: {}", savedUser.getId());
+        log.info("Registered new local user with ID: {}", savedUser.getId());
+
+        // Generate verification token and send verification email
+        String rawToken = emailVerificationTokenService.createVerificationToken(savedUser);
+        emailService.sendVerificationEmail(savedUser.getEmail(), savedUser.getName(), rawToken);
+
         return UserMapper.toResponse(savedUser);
     }
 
     public AuthResponse login(LoginRequest request) {
-        User user = userRepository.findByEmail(request.getEmail())
+        String normalizedEmail = request.getEmail().trim().toLowerCase();
+        User user = userRepository.findByEmail(normalizedEmail)
                 .orElseThrow(() -> new BadCredentialsException("Invalid email or password"));
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
@@ -78,6 +93,10 @@ public class UserService {
 
         if (!user.isActive()) {
             throw new UnauthorizedAccessException("Account is disabled. Please contact support.");
+        }
+
+        if (user.getAuthProvider() == AuthProvider.LOCAL && !user.isEmailVerified()) {
+            throw new EmailNotVerifiedException("EMAIL_NOT_VERIFIED: Please verify your email before logging in.");
         }
 
         String accessToken = jwtService.generateAccessToken(user.getEmail(), user.getRole());
@@ -92,6 +111,40 @@ public class UserService {
                 .expiresInMs(jwtProperties.getAccessTokenExpirationMs())
                 .user(UserMapper.toResponse(user))
                 .build();
+    }
+
+    public void verifyEmail(String rawToken) {
+        emailVerificationTokenService.verifyToken(rawToken);
+    }
+
+    public void resendVerificationEmail(ResendVerificationRequest request) {
+        if (request == null || request.getEmail() == null || request.getEmail().isBlank()) {
+            return;
+        }
+
+        String normalizedEmail = request.getEmail().trim().toLowerCase();
+        Optional<User> userOptional = userRepository.findByEmail(normalizedEmail);
+
+        if (userOptional.isEmpty()) {
+            log.info("Resend verification requested for non-existent email '{}'. Silently ignoring to prevent enumeration.", normalizedEmail);
+            return;
+        }
+
+        User user = userOptional.get();
+
+        if (user.getAuthProvider() != AuthProvider.LOCAL) {
+            log.info("Resend verification requested for non-local OAuth user '{}'. Ignoring.", normalizedEmail);
+            return;
+        }
+
+        if (user.isEmailVerified()) {
+            log.info("Resend verification requested for already-verified user '{}'. Ignoring.", normalizedEmail);
+            return;
+        }
+
+        String rawToken = emailVerificationTokenService.createResendVerificationToken(user);
+        emailService.sendVerificationEmail(user.getEmail(), user.getName(), rawToken);
+        log.info("Resent verification email to user ID: {}", user.getId());
     }
 
     public AuthResponse exchangeOAuth2Code(OAuth2ExchangeRequest request) {

@@ -19,6 +19,18 @@ spring:
   flyway:
     enabled: false
 
+  mail:
+    host: localhost
+    port: 2525
+    username: test
+    password: test
+    properties:
+      mail:
+        smtp:
+          auth: false
+          starttls:
+            enable: false
+
   security:
     oauth2:
       client:
@@ -42,3 +54,8 @@ application:
       secret-key: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
       access-token-expiration-ms: 3600000
       refresh-token-expiration-ms: 86400000
+  mail:
+    from: noreply@expensetracker.local
+    frontend-url: http://localhost:3000
+    expiration-minutes: 30
+    resend-cooldown-seconds: 60

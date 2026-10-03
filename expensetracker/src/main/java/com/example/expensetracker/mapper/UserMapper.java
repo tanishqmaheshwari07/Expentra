@@ -18,6 +18,8 @@ public class UserMapper {
                 .name(user.getName())
                 .email(user.getEmail())
                 .role(user.getRole())
+                .authProvider(user.getAuthProvider())
+                .emailVerified(user.isEmailVerified())
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
                 .build();

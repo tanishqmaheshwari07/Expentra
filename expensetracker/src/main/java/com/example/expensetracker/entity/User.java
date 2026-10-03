@@ -55,6 +55,10 @@ public class User extends BaseAuditableEntity {
     @Builder.Default
     private boolean isActive = true;
 
+    @Column(name = "email_verified", nullable = false)
+    @Builder.Default
+    private boolean emailVerified = false;
+
     @OneToMany(
             mappedBy = "user",
             cascade = CascadeType.ALL,
