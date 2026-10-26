@@ -5,6 +5,7 @@ import { Card, Button } from '../components/ui';
 import { authApi } from '../services/api/authApi';
 import { useAuthStore } from '../store/authStore';
 import { useToast } from '../components/ui/Toast';
+import { parseApiError } from '../utils/errorHandling';
 
 export const OAuth2CallbackPage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -71,18 +72,26 @@ export const OAuth2CallbackPage: React.FC = () => {
         }
       } catch (err: unknown) {
         setIsProcessing(false);
-        // Clean up the one-time code from URL on failure
+        // Clean up the one-time code from URL on failure to avoid repeated submission
         window.history.replaceState({}, document.title, '/oauth2/callback');
 
-        // Check for specific error message or account conflict
-        const errorStr = String(err);
-        if (errorStr.includes('account_conflict') || errorStr.includes('already exists')) {
+        const parsed = parseApiError(err);
+        const errorMsg = parsed.message || '';
+        const lowerMsg = errorMsg.toLowerCase();
+
+        // Check for account conflict or disabled account
+        if (lowerMsg.includes('account_conflict') || lowerMsg.includes('already exists')) {
           navigate('/login?error=account_conflict', { replace: true });
           return;
         }
 
+        if (lowerMsg.includes('disabled') || lowerMsg.includes('account_disabled')) {
+          navigate('/login?error=account_disabled', { replace: true });
+          return;
+        }
+
         setErrorMessage(
-          'Google sign-in could not be completed or the session has expired. Please try signing in again.'
+          errorMsg || 'Google sign-in could not be completed or the session has expired. Please try signing in again.'
         );
       }
     };

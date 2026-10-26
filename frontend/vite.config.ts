@@ -19,7 +19,9 @@ export default defineConfig({
         target: process.env.BACKEND_URL || 'http://localhost:8080',
         changeOrigin: true,
       },
-      '/oauth2': {
+      // Proxy OAuth2 authorization endpoints to Spring Boot (e.g. /oauth2/authorization/google).
+      // Frontend route /oauth2/callback must NOT be proxied to backend.
+      '/oauth2/authorization': {
         target: process.env.BACKEND_URL || 'http://localhost:8080',
         changeOrigin: true,
       },

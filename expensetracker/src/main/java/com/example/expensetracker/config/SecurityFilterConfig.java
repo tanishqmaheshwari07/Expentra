@@ -2,6 +2,7 @@ package com.example.expensetracker.config;
 
 import com.example.expensetracker.security.JwtAuthenticationFilter;
 import com.example.expensetracker.security.oauth2.CustomOAuth2UserService;
+import com.example.expensetracker.security.oauth2.CustomOidcUserService;
 import com.example.expensetracker.security.oauth2.OAuth2AuthenticationFailureHandler;
 import com.example.expensetracker.security.oauth2.OAuth2AuthenticationSuccessHandler;
 import jakarta.servlet.http.HttpServletResponse;
@@ -30,6 +31,7 @@ public class SecurityFilterConfig {
 
     private final JwtAuthenticationFilter jwtFilter;
     private final CustomOAuth2UserService customOAuth2UserService;
+    private final CustomOidcUserService customOidcUserService;
     private final OAuth2AuthenticationSuccessHandler oAuth2AuthenticationSuccessHandler;
     private final OAuth2AuthenticationFailureHandler oAuth2AuthenticationFailureHandler;
 
@@ -97,6 +99,7 @@ public class SecurityFilterConfig {
                         )
                         .userInfoEndpoint(userInfo -> userInfo
                                 .userService(customOAuth2UserService)
+                                .oidcUserService(customOidcUserService)
                         )
                         .successHandler(oAuth2AuthenticationSuccessHandler)
                         .failureHandler(oAuth2AuthenticationFailureHandler)

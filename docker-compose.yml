@@ -8,11 +8,13 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - SPRING_PROFILES_ACTIVE=prod
-      - DB_URL=jdbc:postgresql://postgres:5432/expense_tracker
-      - DB_USERNAME=postgres
-      - DB_PASSWORD=postgres
-      - JWT_SECRET=404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
+      SPRING_PROFILES_ACTIVE: prod
+      DB_URL: jdbc:postgresql://postgres:5432/expense_tracker
+      DB_USERNAME: postgres
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your local environment}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in your local environment}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -27,9 +29,9 @@ services:
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_DB=expense_tracker
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      POSTGRES_DB: expense_tracker
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your local environment}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

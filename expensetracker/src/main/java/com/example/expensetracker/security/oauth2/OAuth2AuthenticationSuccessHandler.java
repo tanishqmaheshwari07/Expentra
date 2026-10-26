@@ -28,14 +28,23 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
             HttpServletResponse response,
             Authentication authentication) throws IOException, ServletException {
 
-        if (authentication.getPrincipal() instanceof CustomOAuth2User customOAuth2User) {
-            User user = customOAuth2User.getUser();
+        User user = null;
+        Object principal = (authentication != null) ? authentication.getPrincipal() : null;
 
+        if (principal instanceof OAuth2UserPrincipal oAuth2UserPrincipal) {
+            user = oAuth2UserPrincipal.getUser();
+        } else if (principal instanceof CustomOAuth2User customOAuth2User) {
+            user = customOAuth2User.getUser();
+        } else if (principal instanceof CustomOidcUser customOidcUser) {
+            user = customOidcUser.getUser();
+        }
+
+        if (user != null) {
             if (!user.isActive()) {
                 log.warn("OAuth login rejected: Account is disabled for email '{}'", user.getEmail());
                 String redirectUrl = UriComponentsBuilder
                         .fromUriString(oAuth2Properties.getFailureRedirectUri())
-                        .queryParam("error", "account_disabled")
+                        .replaceQueryParam("error", "account_disabled")
                         .build()
                         .toUriString();
                 response.sendRedirect(redirectUrl);
@@ -51,10 +60,11 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
                     .build()
                     .toUriString();
 
-            log.info("OAuth2 authentication successful for user '{}'. Redirecting with one-time exchange code.", user.getEmail());
+            log.info("OAuth2/OIDC authentication successful for user '{}'. Redirecting with one-time exchange code.", user.getEmail());
             response.sendRedirect(targetUrl);
         } else {
-            log.error("Unexpected principal type in OAuth2 authentication success: {}", authentication.getPrincipal().getClass());
+            log.error("Unexpected principal type in OAuth2 authentication success: {}",
+                    principal != null ? principal.getClass().getName() : "null");
             response.sendRedirect(oAuth2Properties.getFailureRedirectUri());
         }
     }

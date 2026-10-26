@@ -33,9 +33,12 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
 
     public CustomOAuth2User processOAuth2User(OAuth2User oAuth2User) {
         Map<String, Object> attributes = oAuth2User.getAttributes();
-        String sub = (String) attributes.get("sub");
-        String email = (String) attributes.get("email");
-        String name = (String) attributes.get("name");
+        Object subObj = attributes != null ? (attributes.get("sub") != null ? attributes.get("sub") : attributes.get("id")) : null;
+        String sub = subObj != null ? String.valueOf(subObj).trim() : null;
+        Object emailObj = attributes != null ? attributes.get("email") : null;
+        String email = emailObj != null ? String.valueOf(emailObj).trim() : null;
+        Object nameObj = attributes != null ? attributes.get("name") : null;
+        String name = nameObj != null ? String.valueOf(nameObj).trim() : null;
 
         if (email == null || email.isBlank()) {
             throw new OAuth2AuthenticationException(
