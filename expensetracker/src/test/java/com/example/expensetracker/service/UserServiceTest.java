@@ -11,6 +11,7 @@ import com.example.expensetracker.entity.RefreshToken;
 import com.example.expensetracker.entity.Role;
 import com.example.expensetracker.entity.User;
 import com.example.expensetracker.exception.UserAlreadyExistsException;
+import com.example.expensetracker.repository.EmailVerificationTokenRepository;
 import com.example.expensetracker.repository.RefreshTokenRepository;
 import com.example.expensetracker.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,6 +25,7 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -63,6 +65,9 @@ class UserServiceTest {
 
     @Mock
     private EmailVerificationTokenService emailVerificationTokenService;
+
+    @Mock
+    private EmailVerificationTokenRepository emailVerificationTokenRepository;
 
     @Mock
     private EmailService emailService;
@@ -268,20 +273,30 @@ class UserServiceTest {
                 .user(testUser)
                 .build();
 
-        when(exchangeCodeService.consumeExchangeCode("valid-exchange-code")).thenReturn(Optional.of(1L));
+        when(exchangeCodeService.consumeExchangeCode("valid-exchange-code", "valid-binder")).thenReturn(Optional.of(1L));
         when(userRepository.findById(1L)).thenReturn(Optional.of(testUser));
         when(jwtService.generateAccessToken(eq("alex@example.com"), eq(Role.ROLE_USER))).thenReturn("mock-oauth2-jwt");
         when(jwtProperties.getRefreshTokenExpirationMs()).thenReturn(604800000L);
         when(jwtProperties.getAccessTokenExpirationMs()).thenReturn(900000L);
         when(refreshTokenRepository.save(any(RefreshToken.class))).thenReturn(refreshToken);
 
-        AuthResponse response = userService.exchangeOAuth2Code(request);
+        AuthResponse response = userService.exchangeOAuth2Code(request, "valid-binder");
 
         assertThat(response).isNotNull();
         assertThat(response.getAccessToken()).isEqualTo("mock-oauth2-jwt");
         assertThat(response.getRefreshToken()).isEqualTo("mock-oauth2-refresh-token");
         assertThat(response.getUser().getEmail()).isEqualTo("alex@example.com");
-        verify(exchangeCodeService, times(1)).consumeExchangeCode("valid-exchange-code");
+        verify(exchangeCodeService, times(1)).consumeExchangeCode("valid-exchange-code", "valid-binder");
+    }
+
+    @Test
+    @DisplayName("Exchange OAuth2 code fails when binder cookie is missing")
+    void exchangeOAuth2Code_MissingBinder_ThrowsUnauthorized() {
+        OAuth2ExchangeRequest request = new OAuth2ExchangeRequest("valid-code");
+
+        assertThatThrownBy(() -> userService.exchangeOAuth2Code(request, null))
+                .isInstanceOf(UnauthorizedAccessException.class)
+                .hasMessageContaining("Invalid or expired OAuth2 exchange code");
     }
 
     @Test
@@ -289,9 +304,9 @@ class UserServiceTest {
     void exchangeOAuth2Code_InvalidOrExpired_ThrowsUnauthorized() {
         OAuth2ExchangeRequest request = new OAuth2ExchangeRequest("invalid-or-expired-code");
 
-        when(exchangeCodeService.consumeExchangeCode("invalid-or-expired-code")).thenReturn(Optional.empty());
+        when(exchangeCodeService.consumeExchangeCode("invalid-or-expired-code", "some-binder")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> userService.exchangeOAuth2Code(request))
+        assertThatThrownBy(() -> userService.exchangeOAuth2Code(request, "some-binder"))
                 .isInstanceOf(UnauthorizedAccessException.class)
                 .hasMessageContaining("Invalid or expired OAuth2 exchange code");
     }
@@ -309,10 +324,10 @@ class UserServiceTest {
                 .isActive(false)
                 .build();
 
-        when(exchangeCodeService.consumeExchangeCode("valid-code-inactive-user")).thenReturn(Optional.of(2L));
+        when(exchangeCodeService.consumeExchangeCode("valid-code-inactive-user", "valid-binder")).thenReturn(Optional.of(2L));
         when(userRepository.findById(2L)).thenReturn(Optional.of(inactiveUser));
 
-        assertThatThrownBy(() -> userService.exchangeOAuth2Code(request))
+        assertThatThrownBy(() -> userService.exchangeOAuth2Code(request, "valid-binder"))
                 .isInstanceOf(UnauthorizedAccessException.class)
                 .hasMessageContaining("Account is disabled");
     }
@@ -440,5 +455,28 @@ class UserServiceTest {
 
         verify(emailVerificationTokenService, never()).createResendVerificationToken(any(User.class));
         verify(emailService, never()).sendVerificationEmail(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("cleanupUnverifiedUsers deletes unverified local accounts and associated tokens older than retention period")
+    void cleanupUnverifiedUsers_DeletesExpiredUnverifiedLocalUsers() {
+        User unverifiedUser = User.builder()
+                .id(99L)
+                .name("Unverified Old")
+                .email("unverified@example.com")
+                .authProvider(AuthProvider.LOCAL)
+                .emailVerified(false)
+                .build();
+
+        when(userRepository.findByAuthProviderAndEmailVerifiedFalseAndCreatedAtBefore(eq(AuthProvider.LOCAL), any(java.time.LocalDateTime.class)))
+                .thenReturn(List.of(unverifiedUser));
+
+        int deletedCount = userService.cleanupUnverifiedUsers();
+
+        assertThat(deletedCount).isEqualTo(1);
+        verify(emailVerificationTokenRepository, times(1)).deleteByUser(unverifiedUser);
+        verify(refreshTokenRepository, times(1)).deleteByUser(unverifiedUser);
+        verify(userRepository, times(1)).delete(unverifiedUser);
+        verify(userRepository, times(1)).flush();
     }
 }

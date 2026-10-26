@@ -3,6 +3,7 @@ package com.example.expensetracker.config;
 import com.example.expensetracker.security.JwtAuthenticationFilter;
 import com.example.expensetracker.security.oauth2.CustomOAuth2UserService;
 import com.example.expensetracker.security.oauth2.CustomOidcUserService;
+import com.example.expensetracker.security.oauth2.CustomOAuth2AuthorizationRequestResolver;
 import com.example.expensetracker.security.oauth2.OAuth2AuthenticationFailureHandler;
 import com.example.expensetracker.security.oauth2.OAuth2AuthenticationSuccessHandler;
 import jakarta.servlet.http.HttpServletResponse;
@@ -34,6 +35,11 @@ public class SecurityFilterConfig {
     private final CustomOidcUserService customOidcUserService;
     private final OAuth2AuthenticationSuccessHandler oAuth2AuthenticationSuccessHandler;
     private final OAuth2AuthenticationFailureHandler oAuth2AuthenticationFailureHandler;
+    private final CustomOAuth2AuthorizationRequestResolver customOAuth2AuthorizationRequestResolver;
+    private final com.example.expensetracker.security.oauth2.HttpCookieOAuth2AuthorizationRequestRepository cookieAuthorizationRequestRepository;
+
+    @org.springframework.beans.factory.annotation.Value("${app.cors.allowed-origins:http://localhost:[*],http://127.0.0.1:[*],https://localhost:[*],https://127.0.0.1:[*]}")
+    private String corsAllowedOrigins;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -93,6 +99,8 @@ public class SecurityFilterConfig {
                 .oauth2Login(oauth2 -> oauth2
                         .authorizationEndpoint(authorization -> authorization
                                 .baseUri("/oauth2/authorization")
+                                .authorizationRequestResolver(customOAuth2AuthorizationRequestResolver)
+                                .authorizationRequestRepository(cookieAuthorizationRequestRepository)
                         )
                         .redirectionEndpoint(redirection -> redirection
                                 .baseUri("/login/oauth2/code/*")
@@ -115,12 +123,11 @@ public class SecurityFilterConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOriginPatterns(List.of(
-                "http://localhost:[*]",
-                "http://127.0.0.1:[*]",
-                "https://localhost:[*]",
-                "https://127.0.0.1:[*]"
-        ));
+        List<String> allowedOrigins = java.util.Arrays.stream(corsAllowedOrigins.split(","))
+                .map(String::trim)
+                .filter(origin -> !origin.isEmpty())
+                .toList();
+        configuration.setAllowedOriginPatterns(allowedOrigins);
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Requested-With", "Accept", "Origin", "Cookie"));
         configuration.setExposedHeaders(List.of("Authorization", "Set-Cookie"));

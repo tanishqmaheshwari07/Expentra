@@ -3,6 +3,8 @@ package com.example.expensetracker.security.oauth2;
 import com.example.expensetracker.entity.AuthProvider;
 import com.example.expensetracker.entity.Role;
 import com.example.expensetracker.entity.User;
+import com.example.expensetracker.repository.EmailVerificationTokenRepository;
+import com.example.expensetracker.repository.RefreshTokenRepository;
 import com.example.expensetracker.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +25,8 @@ import java.util.Optional;
 public class CustomOAuth2UserService extends DefaultOAuth2UserService {
 
     private final UserRepository userRepository;
+    private final RefreshTokenRepository refreshTokenRepository;
+    private final EmailVerificationTokenRepository emailVerificationTokenRepository;
 
     @Override
     @Transactional
@@ -31,6 +35,7 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
         return processOAuth2User(oAuth2User);
     }
 
+    @Transactional
     public CustomOAuth2User processOAuth2User(OAuth2User oAuth2User) {
         Map<String, Object> attributes = oAuth2User.getAttributes();
         Object subObj = attributes != null ? (attributes.get("sub") != null ? attributes.get("sub") : attributes.get("id")) : null;
@@ -67,12 +72,26 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
         // 2. Check if an account already exists with this email (e.g. LOCAL email/password account)
         Optional<User> existingUserByEmail = userRepository.findByEmail(normalizedEmail);
         if (existingUserByEmail.isPresent()) {
-            log.warn("Account conflict detected for email '{}'. Account exists with provider: {}",
-                    normalizedEmail, existingUserByEmail.get().getAuthProvider());
-            throw new OAuth2AuthenticationException(
-                    new OAuth2Error("account_conflict"),
-                    "An account with email " + normalizedEmail + " already exists. Please sign in with your email and password."
-            );
+            User existingUser = existingUserByEmail.get();
+            Object emailVerifiedClaim = attributes != null ? attributes.get("email_verified") : null;
+            boolean isGoogleEmailVerified = Boolean.TRUE.equals(emailVerifiedClaim)
+                    || (emailVerifiedClaim instanceof String s && "true".equalsIgnoreCase(s.trim()));
+
+            // Step 6: If existing account is LOCAL and unverified, and Google email is verified, replace with Google user
+            if (existingUser.getAuthProvider() == AuthProvider.LOCAL && !existingUser.isEmailVerified() && isGoogleEmailVerified) {
+                log.info("Resolving account conflict: Unverified LOCAL account exists for '{}', but Google email is verified. Deleting unverified account and provisioning Google user.", normalizedEmail);
+                emailVerificationTokenRepository.deleteByUser(existingUser);
+                refreshTokenRepository.deleteByUser(existingUser);
+                userRepository.delete(existingUser);
+                userRepository.flush();
+            } else {
+                log.warn("Account conflict detected for email '{}'. Account exists with provider: {}",
+                        normalizedEmail, existingUser.getAuthProvider());
+                throw new OAuth2AuthenticationException(
+                        new OAuth2Error("account_conflict"),
+                        "An account with email " + normalizedEmail + " already exists. Please sign in with your email and password."
+                );
+            }
         }
 
         // 3. Auto-provision new Google User

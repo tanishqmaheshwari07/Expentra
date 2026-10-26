@@ -68,6 +68,12 @@ export const LoginPage: React.FC = () => {
         setErrorMessage(
           'This Google account is already associated with a different login method. Please sign in with your existing account.'
         );
+      } else if (error === 'email_not_verified') {
+        setErrorMessage(
+          'Your Google account email address is not verified. Please verify your email with Google and try again.'
+        );
+      } else if (error === 'account_disabled') {
+        setErrorMessage('This account is disabled. Please contact support.');
       } else if (error === 'oauth_failed') {
         setErrorMessage('Google sign-in was cancelled or could not be completed. Please try again.');
       } else {

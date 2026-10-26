@@ -19,11 +19,14 @@ import com.example.expensetracker.exception.UnauthorizedAccessException;
 import com.example.expensetracker.exception.UserAlreadyExistsException;
 import com.example.expensetracker.exception.UserNotFoundException;
 import com.example.expensetracker.mapper.UserMapper;
+import com.example.expensetracker.repository.EmailVerificationTokenRepository;
 import com.example.expensetracker.repository.RefreshTokenRepository;
 import com.example.expensetracker.repository.UserRepository;
 import com.example.expensetracker.security.oauth2.OAuth2ExchangeCodeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -36,6 +39,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -48,6 +52,7 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
+    private final EmailVerificationTokenRepository emailVerificationTokenRepository;
     private final ExpenseRepository expenseRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
@@ -55,6 +60,13 @@ public class UserService {
     private final OAuth2ExchangeCodeService exchangeCodeService;
     private final EmailVerificationTokenService emailVerificationTokenService;
     private final EmailService emailService;
+
+    @Value("${application.users.unverified-cleanup-days:7}")
+    private int unverifiedCleanupDays = 7;
+
+    public void setUnverifiedCleanupDays(int unverifiedCleanupDays) {
+        this.unverifiedCleanupDays = unverifiedCleanupDays;
+    }
 
     public UserResponse createUser(UserRequest userRequest) {
         String normalizedEmail = userRequest.getEmail().trim().toLowerCase();
@@ -148,11 +160,20 @@ public class UserService {
     }
 
     public AuthResponse exchangeOAuth2Code(OAuth2ExchangeRequest request) {
+        return exchangeOAuth2Code(request, null);
+    }
+
+    public AuthResponse exchangeOAuth2Code(OAuth2ExchangeRequest request, String binderCookie) {
         if (request == null || request.getCode() == null || request.getCode().isBlank()) {
             throw new UnauthorizedAccessException("Exchange code is required");
         }
 
-        Long userId = exchangeCodeService.consumeExchangeCode(request.getCode())
+        if (binderCookie == null || binderCookie.isBlank()) {
+            log.warn("OAuth2 exchange rejected: Missing oauth_binder cookie");
+            throw new UnauthorizedAccessException("Invalid or expired OAuth2 exchange code");
+        }
+
+        Long userId = exchangeCodeService.consumeExchangeCode(request.getCode(), binderCookie)
                 .orElseThrow(() -> new UnauthorizedAccessException("Invalid or expired OAuth2 exchange code"));
 
         User user = userRepository.findById(userId)
@@ -361,5 +382,28 @@ public class UserService {
         String email = authentication.getName();
         return userRepository.findByEmail(email)
                 .orElseThrow(() -> new UserNotFoundException("User with email " + email + " not found"));
+    }
+
+    /**
+     * Step 6: Scheduled cleanup of unverified LOCAL user accounts older than configurable days (default 7).
+     * Deletes orphaned email verification tokens and refresh tokens prior to removing the user.
+     */
+    @Scheduled(cron = "${application.users.unverified-cleanup-cron:0 0 2 * * *}")
+    public int cleanupUnverifiedUsers() {
+        LocalDateTime cutoff = LocalDateTime.now().minusDays(unverifiedCleanupDays);
+        List<User> expiredUsers = userRepository.findByAuthProviderAndEmailVerifiedFalseAndCreatedAtBefore(AuthProvider.LOCAL, cutoff);
+        if (expiredUsers.isEmpty()) {
+            return 0;
+        }
+        log.info("Found {} unverified local user accounts older than {} days (cutoff: {}). Cleaning up...",
+                expiredUsers.size(), unverifiedCleanupDays, cutoff);
+        for (User user : expiredUsers) {
+            emailVerificationTokenRepository.deleteByUser(user);
+            refreshTokenRepository.deleteByUser(user);
+            userRepository.delete(user);
+        }
+        userRepository.flush();
+        log.info("Finished cleaning up {} unverified local user accounts", expiredUsers.size());
+        return expiredUsers.size();
     }
 }

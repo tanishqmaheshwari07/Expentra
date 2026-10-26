@@ -117,4 +117,48 @@ class CustomOidcUserServiceTest {
         assertThat(oidcResult.getAuthorities()).extracting("authority").contains("ROLE_USER");
         verify(customOAuth2UserService, times(1)).processOAuth2User(any(OidcUser.class));
     }
+
+    @Test
+    @DisplayName("CustomOidcUserService rejects login when email_verified is false")
+    void customOidcUserService_EmailNotVerified_ThrowsOAuth2AuthenticationException() {
+        Instant now = Instant.now();
+        OidcIdToken idToken = new OidcIdToken(
+                "token-val",
+                now,
+                now.plusSeconds(3600),
+                Map.of("sub", "google-sub-unverified", "email", "unverified@example.com", "email_verified", false)
+        );
+        OidcUserInfo userInfo = new OidcUserInfo(idToken.getClaims());
+        OidcUser unverifiedOidcUser = new DefaultOidcUser(
+                List.of(new SimpleGrantedAuthority("SCOPE_openid")),
+                idToken,
+                userInfo,
+                "sub"
+        );
+
+        CustomOidcUserService service = new CustomOidcUserService(customOAuth2UserService) {
+            @Override
+            public OidcUser loadUser(OidcUserRequest userRequest) {
+                Object emailVerifiedClaim = unverifiedOidcUser.getAttributes().get("email_verified");
+                boolean isEmailVerified = Boolean.TRUE.equals(emailVerifiedClaim)
+                        || (emailVerifiedClaim instanceof String s && "true".equalsIgnoreCase(s.trim()));
+
+                if (!isEmailVerified) {
+                    throw new org.springframework.security.oauth2.core.OAuth2AuthenticationException(
+                            new org.springframework.security.oauth2.core.OAuth2Error("email_not_verified"),
+                            "Your Google email address is not verified. Please verify your email with Google and try again."
+                    );
+                }
+                return unverifiedOidcUser;
+            }
+        };
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.loadUser(null))
+                .isInstanceOf(org.springframework.security.oauth2.core.OAuth2AuthenticationException.class)
+                .satisfies(ex -> {
+                    org.springframework.security.oauth2.core.OAuth2AuthenticationException oauthEx =
+                            (org.springframework.security.oauth2.core.OAuth2AuthenticationException) ex;
+                    assertThat(oauthEx.getError().getErrorCode()).isEqualTo("email_not_verified");
+                });
+    }
 }

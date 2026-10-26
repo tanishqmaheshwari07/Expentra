@@ -27,6 +27,21 @@ public class CustomOidcUserService extends OidcUserService {
         // Delegate to standard OidcUserService to validate ID token and fetch UserInfo
         OidcUser oidcUser = super.loadUser(userRequest);
 
+        // Reject if email_verified claim is not exactly true
+        Object emailVerifiedClaim = (oidcUser.getAttributes() != null)
+                ? oidcUser.getAttributes().get("email_verified")
+                : null;
+        boolean isEmailVerified = Boolean.TRUE.equals(emailVerifiedClaim)
+                || (emailVerifiedClaim instanceof String s && "true".equalsIgnoreCase(s.trim()));
+
+        if (!isEmailVerified) {
+            log.warn("OAuth2/OIDC user rejected: Google email is not verified");
+            throw new OAuth2AuthenticationException(
+                    new org.springframework.security.oauth2.core.OAuth2Error("email_not_verified"),
+                    "Your Google email address is not verified. Please verify your email with Google and try again."
+            );
+        }
+
         // Reuse existing account lookup and provisioning logic
         CustomOAuth2User customOAuth2User = customOAuth2UserService.processOAuth2User(oidcUser);
         User user = customOAuth2User.getUser();

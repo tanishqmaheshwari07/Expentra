@@ -1,5 +1,6 @@
 package com.example.expensetracker.config;
 
+import jakarta.annotation.PostConstruct;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -25,4 +26,17 @@ public class OAuth2Properties {
      * Lifespan of one-time exchange code in seconds (default: 300s / 5 minutes).
      */
     private long exchangeCodeExpirationSeconds = 300L;
+
+    /**
+     * Secret key for HMAC signing of OAuth2 authorization request cookies.
+     * Must have NO default value in production.
+     */
+    private String cookieSecret;
+
+    @PostConstruct
+    public void validateProperties() {
+        if (cookieSecret == null || cookieSecret.isBlank()) {
+            throw new IllegalStateException("OAuth2 cookieSecret must be configured (has NO default value)");
+        }
+    }
 }

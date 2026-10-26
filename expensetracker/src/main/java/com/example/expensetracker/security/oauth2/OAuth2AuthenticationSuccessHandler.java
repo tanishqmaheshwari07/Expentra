@@ -15,12 +15,28 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.io.IOException;
 
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccessHandler {
 
     private final OAuth2Properties oAuth2Properties;
     private final OAuth2ExchangeCodeService exchangeCodeService;
+    private final HttpCookieOAuth2AuthorizationRequestRepository authorizationRequestRepository;
+
+    public OAuth2AuthenticationSuccessHandler(
+            OAuth2Properties oAuth2Properties,
+            OAuth2ExchangeCodeService exchangeCodeService) {
+        this(oAuth2Properties, exchangeCodeService, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public OAuth2AuthenticationSuccessHandler(
+            OAuth2Properties oAuth2Properties,
+            OAuth2ExchangeCodeService exchangeCodeService,
+            @org.springframework.lang.Nullable HttpCookieOAuth2AuthorizationRequestRepository authorizationRequestRepository) {
+        this.oAuth2Properties = oAuth2Properties;
+        this.exchangeCodeService = exchangeCodeService;
+        this.authorizationRequestRepository = authorizationRequestRepository;
+    }
 
     @Override
     public void onAuthenticationSuccess(
@@ -39,6 +55,9 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
             user = customOidcUser.getUser();
         }
 
+        // Step 5: Clean up short-lived authorization request cookie
+        clearAuthorizationRequestCookies(request, response);
+
         if (user != null) {
             if (!user.isActive()) {
                 log.warn("OAuth login rejected: Account is disabled for email '{}'", user.getEmail());
@@ -51,8 +70,30 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
                 return;
             }
 
-            // Generate short-lived single-use exchange code (DO NOT put JWT in URL)
-            String exchangeCode = exchangeCodeService.createExchangeCode(user.getId(), user.getEmail());
+            // Step 3: Validate browser binding cookie
+            String binderCookie = null;
+            if (request.getCookies() != null) {
+                for (jakarta.servlet.http.Cookie c : request.getCookies()) {
+                    if (CustomOAuth2AuthorizationRequestResolver.OAUTH_BINDER_COOKIE_NAME.equals(c.getName())) {
+                        binderCookie = c.getValue();
+                        break;
+                    }
+                }
+            }
+
+            if (binderCookie == null || binderCookie.isBlank()) {
+                log.warn("OAuth login rejected: Missing oauth_binder cookie");
+                String redirectUrl = UriComponentsBuilder
+                        .fromUriString(oAuth2Properties.getFailureRedirectUri())
+                        .replaceQueryParam("error", "oauth_failed")
+                        .build()
+                        .toUriString();
+                response.sendRedirect(redirectUrl);
+                return;
+            }
+
+            // Generate short-lived single-use exchange code bound to browser binder (DO NOT put JWT in URL)
+            String exchangeCode = exchangeCodeService.createExchangeCode(user.getId(), binderCookie);
 
             String targetUrl = UriComponentsBuilder
                     .fromUriString(oAuth2Properties.getAuthorizedRedirectUri())
@@ -66,6 +107,12 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
             log.error("Unexpected principal type in OAuth2 authentication success: {}",
                     principal != null ? principal.getClass().getName() : "null");
             response.sendRedirect(oAuth2Properties.getFailureRedirectUri());
+        }
+    }
+
+    protected void clearAuthorizationRequestCookies(HttpServletRequest request, HttpServletResponse response) {
+        if (authorizationRequestRepository != null) {
+            authorizationRequestRepository.removeAuthorizationRequestCookies(request, response);
         }
     }
 }

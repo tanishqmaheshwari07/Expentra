@@ -42,6 +42,54 @@ services:
       - key: JWT_REFRESH_EXPIRATION_MS
         value: "604800000"
 
+      - key: COOKIE_SECURE
+        sync: false
+
+      - key: COOKIE_SAME_SITE
+        sync: false
+
+      - key: APP_CORS_ALLOWED_ORIGINS
+        sync: false
+
+      - key: APP_FRONTEND_URL
+        sync: false
+
+      - key: MAIL_HOST
+        sync: false
+
+      - key: MAIL_PORT
+        sync: false
+
+      - key: MAIL_USERNAME
+        sync: false
+
+      - key: MAIL_PASSWORD
+        sync: false
+
+      - key: MAIL_AUTH
+        sync: false
+
+      - key: MAIL_STARTTLS_ENABLE
+        sync: false
+
+      - key: MAIL_STARTTLS_REQUIRED
+        sync: false
+
+      - key: MAIL_FROM
+        sync: false
+
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+
+      - key: OAUTH2_REDIRECT_URI
+        sync: false
+
+      - key: OAUTH2_FAILURE_REDIRECT_URI
+        sync: false
+
   # Frontend - React + Vite
   - type: web
     name: expensetracker-frontend

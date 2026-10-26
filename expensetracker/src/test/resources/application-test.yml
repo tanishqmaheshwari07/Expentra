@@ -39,14 +39,18 @@ spring:
             client-id: test-google-client-id
             client-secret: test-google-client-secret
             client-authentication-method: client_secret_post
-            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+            redirect-uri: "{baseScheme}://{baseHost}{basePort}{basePath}/login/oauth2/code/{registrationId}"
             scope:
               - openid
               - profile
               - email
 
 application:
+  users:
+    unverified-cleanup-days: 7
+
   oauth2:
+    cookie-secret: "test-oauth2-cookie-hmac-secret-key-32-bytes-long"
     authorized-redirect-uri: http://localhost:3000/oauth2/callback
     failure-redirect-uri: http://localhost:3000/login?error=oauth_failed
     exchange-code-expiration-seconds: 300

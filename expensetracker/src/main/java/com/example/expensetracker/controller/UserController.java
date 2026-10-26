@@ -101,14 +101,24 @@ public class UserController {
     @Operation(summary = "Exchange OAuth2 code", description = "Consumes a one-time OAuth2 exchange code, issues JWT access token, and sets refresh token cookie")
     @PostMapping("/oauth2/exchange")
     public ResponseEntity<ApiResponse<AuthResponse>> exchangeOAuth2Code(
-            @Valid @RequestBody OAuth2ExchangeRequest exchangeRequest) {
-        AuthResponse response = userService.exchangeOAuth2Code(exchangeRequest);
+            @Valid @RequestBody OAuth2ExchangeRequest exchangeRequest,
+            @CookieValue(name = "oauth_binder", required = false) String binderCookie) {
+        AuthResponse response = userService.exchangeOAuth2Code(exchangeRequest, binderCookie);
         String rawRefreshToken = response.getRefreshToken();
 
         ResponseCookie cookie = createRefreshTokenCookie(
                 rawRefreshToken,
                 jwtProperties.getRefreshTokenExpirationMs() / 1000
         );
+
+        // Clear the oauth_binder cookie after successful exchange
+        ResponseCookie clearBinderCookie = ResponseCookie.from("oauth_binder", "")
+                .httpOnly(true)
+                .secure(jwtProperties.isCookieSecure())
+                .sameSite(jwtProperties.getCookieSameSite())
+                .path("/")
+                .maxAge(0)
+                .build();
 
         // Sanitize response to never expose refresh token to JavaScript
         AuthResponse sanitizedResponse = AuthResponse.builder()
@@ -120,6 +130,7 @@ public class UserController {
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookie.toString())
+                .header(HttpHeaders.SET_COOKIE, clearBinderCookie.toString())
                 .body(ApiResponse.ok(sanitizedResponse, "OAuth2 authentication successful"));
     }
 

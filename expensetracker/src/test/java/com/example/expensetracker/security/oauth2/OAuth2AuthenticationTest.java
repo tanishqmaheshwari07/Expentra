@@ -4,6 +4,9 @@ import com.example.expensetracker.config.OAuth2Properties;
 import com.example.expensetracker.entity.AuthProvider;
 import com.example.expensetracker.entity.Role;
 import com.example.expensetracker.entity.User;
+import com.example.expensetracker.repository.EmailVerificationTokenRepository;
+import com.example.expensetracker.repository.OAuthExchangeCodeRepository;
+import com.example.expensetracker.repository.RefreshTokenRepository;
 import com.example.expensetracker.repository.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -51,6 +54,12 @@ class OAuth2AuthenticationTest {
     private UserRepository userRepository;
 
     @Mock
+    private RefreshTokenRepository refreshTokenRepository;
+
+    @Mock
+    private EmailVerificationTokenRepository emailVerificationTokenRepository;
+
+    @Mock
     private OAuth2Properties oAuth2Properties;
 
     @Mock
@@ -71,14 +80,33 @@ class OAuth2AuthenticationTest {
     private OAuth2Properties realOAuth2Properties;
     private OAuth2ExchangeCodeService realExchangeCodeService;
 
+    private final java.util.Map<String, com.example.expensetracker.entity.OAuthExchangeCode> mockCodeTable = new java.util.concurrent.ConcurrentHashMap<>();
+
     @BeforeEach
     void setUp() {
+        mockCodeTable.clear();
         realOAuth2Properties = new OAuth2Properties();
         realOAuth2Properties.setAuthorizedRedirectUri("http://localhost:3000/oauth2/callback");
         realOAuth2Properties.setFailureRedirectUri("http://localhost:3000/login?error=oauth_failed");
         realOAuth2Properties.setExchangeCodeExpirationSeconds(300L);
+        realOAuth2Properties.setCookieSecret("test-cookie-secret-for-oauth2-32-bytes");
 
-        realExchangeCodeService = new OAuth2ExchangeCodeService(realOAuth2Properties);
+        OAuthExchangeCodeRepository mockRepo = mock(OAuthExchangeCodeRepository.class);
+        lenient().when(mockRepo.save(any(com.example.expensetracker.entity.OAuthExchangeCode.class))).thenAnswer(invocation -> {
+            com.example.expensetracker.entity.OAuthExchangeCode code = invocation.getArgument(0);
+            mockCodeTable.put(code.getCodeHash(), code);
+            return code;
+        });
+        lenient().when(mockRepo.consumeCodeAtomically(anyString())).thenAnswer(invocation -> {
+            String hash = invocation.getArgument(0);
+            com.example.expensetracker.entity.OAuthExchangeCode removed = mockCodeTable.remove(hash);
+            if (removed != null && removed.getExpiresAt().isAfter(Instant.now())) {
+                return Optional.of(new com.example.expensetracker.dto.ConsumedOAuthCode(removed.getUserId(), removed.getBinderHash()));
+            }
+            return Optional.empty();
+        });
+
+        realExchangeCodeService = new OAuth2ExchangeCodeService(realOAuth2Properties, mockRepo);
     }
 
     @Test
@@ -169,12 +197,13 @@ class OAuth2AuthenticationTest {
     }
 
     @Test
-    @DisplayName("3. Existing LOCAL account conflict - throws OAuth2AuthenticationException")
+    @DisplayName("3. Existing verified LOCAL account conflict - throws OAuth2AuthenticationException")
     void processOAuth2User_ExistingLocalAccount_ThrowsAccountConflict() {
         Map<String, Object> attributes = new HashMap<>();
         attributes.put("sub", "google-sub-99999");
         attributes.put("email", "localuser@example.com");
         attributes.put("name", "Local Account Holder");
+        attributes.put("email_verified", true);
 
         OAuth2User oAuth2User = new DefaultOAuth2User(
                 Collections.emptyList(),
@@ -191,6 +220,7 @@ class OAuth2AuthenticationTest {
                 .providerId(null)
                 .role(Role.ROLE_USER)
                 .isActive(true)
+                .emailVerified(true)
                 .build();
 
         when(userRepository.findByAuthProviderAndProviderId(AuthProvider.GOOGLE, "google-sub-99999"))
@@ -203,6 +233,65 @@ class OAuth2AuthenticationTest {
                 .hasMessageContaining("already exists");
 
         verify(userRepository, never()).save(any(User.class));
+        verify(userRepository, never()).delete(any(User.class));
+    }
+
+    @Test
+    @DisplayName("3b. Existing unverified LOCAL account and Google verified - deletes unverified account and provisions Google user")
+    void processOAuth2User_ExistingUnverifiedLocalAccountAndGoogleVerified_DeletesUnverifiedAndCreatesGoogleUser() {
+        Map<String, Object> attributes = new HashMap<>();
+        attributes.put("sub", "google-sub-77777");
+        attributes.put("email", "unverified-local@example.com");
+        attributes.put("name", "Google Real User");
+        attributes.put("email_verified", true);
+
+        OAuth2User oAuth2User = new DefaultOAuth2User(
+                Collections.emptyList(),
+                attributes,
+                "email"
+        );
+
+        User unverifiedLocalUser = User.builder()
+                .id(22L)
+                .name("Old Unverified")
+                .email("unverified-local@example.com")
+                .password("somePasswordHash")
+                .authProvider(AuthProvider.LOCAL)
+                .providerId(null)
+                .role(Role.ROLE_USER)
+                .isActive(true)
+                .emailVerified(false)
+                .build();
+
+        when(userRepository.findByAuthProviderAndProviderId(AuthProvider.GOOGLE, "google-sub-77777"))
+                .thenReturn(Optional.empty());
+        when(userRepository.findByEmail("unverified-local@example.com"))
+                .thenReturn(Optional.of(unverifiedLocalUser));
+
+        User savedGoogleUser = User.builder()
+                .id(33L)
+                .name("Google Real User")
+                .email("unverified-local@example.com")
+                .authProvider(AuthProvider.GOOGLE)
+                .providerId("google-sub-77777")
+                .role(Role.ROLE_USER)
+                .isActive(true)
+                .emailVerified(true)
+                .build();
+
+        when(userRepository.save(any(User.class))).thenReturn(savedGoogleUser);
+
+        CustomOAuth2User result = customOAuth2UserService.processOAuth2User(oAuth2User);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getUser().getId()).isEqualTo(33L);
+        assertThat(result.getUser().getAuthProvider()).isEqualTo(AuthProvider.GOOGLE);
+
+        verify(emailVerificationTokenRepository, times(1)).deleteByUser(unverifiedLocalUser);
+        verify(refreshTokenRepository, times(1)).deleteByUser(unverifiedLocalUser);
+        verify(userRepository, times(1)).delete(unverifiedLocalUser);
+        verify(userRepository, times(1)).flush();
+        verify(userRepository, times(1)).save(any(User.class));
     }
 
     @Test
@@ -307,8 +396,11 @@ class OAuth2AuthenticationTest {
                 user
         );
 
+        when(request.getCookies()).thenReturn(new jakarta.servlet.http.Cookie[]{
+                new jakarta.servlet.http.Cookie("oauth_binder", "mock-binder-123")
+        });
         when(authentication.getPrincipal()).thenReturn(customOidcUser);
-        when(exchangeCodeService.createExchangeCode(55L, "oidc@gmail.com")).thenReturn("code-oidc-123");
+        when(exchangeCodeService.createExchangeCode(55L, "mock-binder-123")).thenReturn("code-oidc-123");
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
@@ -352,7 +444,7 @@ class OAuth2AuthenticationTest {
     @Test
     @DisplayName("8a. Exchange code works once and redirects with short-lived code")
     void exchangeCode_WorksOnce() {
-        String code = realExchangeCodeService.createExchangeCode(10L, "user@example.com");
+        String code = realExchangeCodeService.createExchangeCode(10L, "");
         assertThat(code).isNotBlank();
 
         Optional<Long> userIdOpt = realExchangeCodeService.consumeExchangeCode(code);
@@ -363,7 +455,7 @@ class OAuth2AuthenticationTest {
     @Test
     @DisplayName("8b. Exchange code cannot be reused (single-use constraint)")
     void exchangeCode_CannotBeReused() {
-        String code = realExchangeCodeService.createExchangeCode(10L, "user@example.com");
+        String code = realExchangeCodeService.createExchangeCode(10L, "");
 
         Optional<Long> firstConsume = realExchangeCodeService.consumeExchangeCode(code);
         assertThat(firstConsume).isPresent();
@@ -377,10 +469,26 @@ class OAuth2AuthenticationTest {
     @DisplayName("8c. Expired exchange code fails")
     void exchangeCode_ExpiredCode_Fails() {
         OAuth2Properties shortLivedProps = new OAuth2Properties();
-        shortLivedProps.setExchangeCodeExpirationSeconds(-10L); // Already expired
+        shortLivedProps.setExchangeCodeExpirationSeconds(-10L);
 
-        OAuth2ExchangeCodeService shortLivedService = new OAuth2ExchangeCodeService(shortLivedProps);
-        String code = shortLivedService.createExchangeCode(10L, "user@example.com");
+        OAuthExchangeCodeRepository shortLivedRepo = mock(OAuthExchangeCodeRepository.class);
+        java.util.Map<String, com.example.expensetracker.entity.OAuthExchangeCode> table = new java.util.HashMap<>();
+        lenient().when(shortLivedRepo.save(any(com.example.expensetracker.entity.OAuthExchangeCode.class))).thenAnswer(inv -> {
+            com.example.expensetracker.entity.OAuthExchangeCode c = inv.getArgument(0);
+            table.put(c.getCodeHash(), c);
+            return c;
+        });
+        lenient().when(shortLivedRepo.consumeCodeAtomically(anyString())).thenAnswer(inv -> {
+            String h = inv.getArgument(0);
+            com.example.expensetracker.entity.OAuthExchangeCode c = table.remove(h);
+            if (c != null && c.getExpiresAt().isAfter(java.time.Instant.now())) {
+                return Optional.of(new com.example.expensetracker.dto.ConsumedOAuthCode(c.getUserId(), c.getBinderHash()));
+            }
+            return Optional.empty();
+        });
+
+        OAuth2ExchangeCodeService shortLivedService = new OAuth2ExchangeCodeService(shortLivedProps, shortLivedRepo);
+        String code = shortLivedService.createExchangeCode(10L, "");
 
         Optional<Long> consumeResult = shortLivedService.consumeExchangeCode(code);
         assertThat(consumeResult).isEmpty();
@@ -405,8 +513,11 @@ class OAuth2AuthenticationTest {
                 .build();
 
         CustomOAuth2User customOAuth2User = new CustomOAuth2User(user, Map.of("email", "testuser@gmail.com"));
+        when(request.getCookies()).thenReturn(new jakarta.servlet.http.Cookie[]{
+                new jakarta.servlet.http.Cookie("oauth_binder", "mock-binder-456")
+        });
         when(authentication.getPrincipal()).thenReturn(customOAuth2User);
-        when(exchangeCodeService.createExchangeCode(20L, "testuser@gmail.com")).thenReturn("mock-exchange-code-abc");
+        when(exchangeCodeService.createExchangeCode(20L, "mock-binder-456")).thenReturn("mock-exchange-code-abc");
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
@@ -417,6 +528,37 @@ class OAuth2AuthenticationTest {
         assertThat(redirectUrl).startsWith("http://localhost:3000/oauth2/callback?code=mock-exchange-code-abc");
         assertThat(redirectUrl).doesNotContain("Bearer");
         assertThat(redirectUrl).doesNotContain("eyJ"); // Does not contain raw JWT
+    }
+
+    @Test
+    @DisplayName("Success handler missing oauth_binder redirects to failure redirect URL")
+    void successHandler_MissingBinderCookie_RedirectsToFailureUrl() throws Exception {
+        OAuth2AuthenticationSuccessHandler handler = new OAuth2AuthenticationSuccessHandler(
+                realOAuth2Properties,
+                exchangeCodeService
+        );
+
+        User user = User.builder()
+                .id(20L)
+                .name("Test User")
+                .email("testuser@gmail.com")
+                .authProvider(AuthProvider.GOOGLE)
+                .providerId("google-sub-20")
+                .role(Role.ROLE_USER)
+                .isActive(true)
+                .build();
+
+        CustomOAuth2User customOAuth2User = new CustomOAuth2User(user, Map.of("email", "testuser@gmail.com"));
+        when(authentication.getPrincipal()).thenReturn(customOAuth2User);
+        when(request.getCookies()).thenReturn(null);
+
+        handler.onAuthenticationSuccess(request, response, authentication);
+
+        verify(exchangeCodeService, never()).createExchangeCode(anyLong(), anyString());
+        ArgumentCaptor<String> redirectCaptor = ArgumentCaptor.forClass(String.class);
+        verify(response, times(1)).sendRedirect(redirectCaptor.capture());
+
+        assertThat(redirectCaptor.getValue()).isEqualTo("http://localhost:3000/login?error=oauth_failed");
     }
 
     @Test
@@ -436,5 +578,23 @@ class OAuth2AuthenticationTest {
 
         String redirectUrl = redirectCaptor.getValue();
         assertThat(redirectUrl).isEqualTo("http://localhost:3000/login?error=account_conflict");
+    }
+
+    @Test
+    @DisplayName("Failure Handler redirects to frontend with error=email_not_verified when email_not_verified occurs")
+    void failureHandler_EmailNotVerified_RedirectsWithMappedError() throws Exception {
+        OAuth2AuthenticationFailureHandler failureHandler = new OAuth2AuthenticationFailureHandler(realOAuth2Properties);
+
+        OAuth2AuthenticationException ex = new OAuth2AuthenticationException(
+                new OAuth2Error("email_not_verified"),
+                "Email is not verified by Google"
+        );
+
+        failureHandler.onAuthenticationFailure(request, response, ex);
+
+        ArgumentCaptor<String> redirectCaptor = ArgumentCaptor.forClass(String.class);
+        verify(response, times(1)).sendRedirect(redirectCaptor.capture());
+
+        assertThat(redirectCaptor.getValue()).isEqualTo("http://localhost:3000/login?error=email_not_verified");
     }
 }
