@@ -74,6 +74,10 @@ application:
 
   # User Account Management
   users:
+    # Kill switch for stale unverified user cleanup job. Default is false (disabled).
+    unverified-cleanup-enabled: ${UNVERIFIED_USERS_CLEANUP_ENABLED:false}
+    # Dry-run mode for cleanup job. When true, logs eligible user IDs and masked emails without deleting. Default is true.
+    unverified-cleanup-dry-run: ${UNVERIFIED_USERS_CLEANUP_DRY_RUN:true}
     unverified-cleanup-days: ${UNVERIFIED_USERS_CLEANUP_DAYS:7}
 
   # Email Verification

@@ -47,6 +47,8 @@ spring:
 
 application:
   users:
+    unverified-cleanup-enabled: false
+    unverified-cleanup-dry-run: true
     unverified-cleanup-days: 7
 
   oauth2:

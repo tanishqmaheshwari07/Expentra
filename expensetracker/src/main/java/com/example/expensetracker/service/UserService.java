@@ -40,6 +40,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -61,8 +62,22 @@ public class UserService {
     private final EmailVerificationTokenService emailVerificationTokenService;
     private final EmailService emailService;
 
+    @Value("${application.users.unverified-cleanup-enabled:false}")
+    private boolean unverifiedCleanupEnabled = false;
+
+    @Value("${application.users.unverified-cleanup-dry-run:true}")
+    private boolean unverifiedCleanupDryRun = true;
+
     @Value("${application.users.unverified-cleanup-days:7}")
     private int unverifiedCleanupDays = 7;
+
+    public void setUnverifiedCleanupEnabled(boolean unverifiedCleanupEnabled) {
+        this.unverifiedCleanupEnabled = unverifiedCleanupEnabled;
+    }
+
+    public void setUnverifiedCleanupDryRun(boolean unverifiedCleanupDryRun) {
+        this.unverifiedCleanupDryRun = unverifiedCleanupDryRun;
+    }
 
     public void setUnverifiedCleanupDays(int unverifiedCleanupDays) {
         this.unverifiedCleanupDays = unverifiedCleanupDays;
@@ -385,25 +400,64 @@ public class UserService {
     }
 
     /**
-     * Step 6: Scheduled cleanup of unverified LOCAL user accounts older than configurable days (default 7).
+     * Scheduled cleanup of unverified LOCAL user accounts older than configurable days (default 7).
+     * Protected by kill switch (application.users.unverified-cleanup-enabled, default false)
+     * and dry-run mode (application.users.unverified-cleanup-dry-run, default true).
+     * Never deletes accounts that own any expenses (including soft-deleted expenses).
      * Deletes orphaned email verification tokens and refresh tokens prior to removing the user.
      */
     @Scheduled(cron = "${application.users.unverified-cleanup-cron:0 0 2 * * *}")
     public int cleanupUnverifiedUsers() {
-        LocalDateTime cutoff = LocalDateTime.now().minusDays(unverifiedCleanupDays);
-        List<User> expiredUsers = userRepository.findByAuthProviderAndEmailVerifiedFalseAndCreatedAtBefore(AuthProvider.LOCAL, cutoff);
-        if (expiredUsers.isEmpty()) {
+        if (!unverifiedCleanupEnabled) {
+            log.info("Unverified user cleanup is disabled (application.users.unverified-cleanup-enabled=false). Skipping.");
             return 0;
         }
-        log.info("Found {} unverified local user accounts older than {} days (cutoff: {}). Cleaning up...",
-                expiredUsers.size(), unverifiedCleanupDays, cutoff);
-        for (User user : expiredUsers) {
+
+        LocalDateTime cutoff = LocalDateTime.now().minusDays(unverifiedCleanupDays);
+        List<User> eligibleUsers = userRepository.findStaleUnverifiedWithoutExpenses(AuthProvider.LOCAL, cutoff);
+        if (eligibleUsers.isEmpty()) {
+            log.info("No unverified local user accounts eligible for cleanup older than {} days (cutoff: {}).",
+                    unverifiedCleanupDays, cutoff);
+            return 0;
+        }
+
+        if (unverifiedCleanupDryRun) {
+            List<String> userSummaries = eligibleUsers.stream()
+                    .map(u -> String.format("[id=%d, email=%s]", u.getId(), maskEmail(u.getEmail())))
+                    .toList();
+            log.info("Unverified user cleanup DRY-RUN: found {} eligible accounts that WOULD be deleted: {}",
+                    eligibleUsers.size(), userSummaries);
+            return 0;
+        }
+
+        List<Long> deletedUserIds = new ArrayList<>();
+        log.info("Found {} unverified local user accounts older than {} days with zero expenses (cutoff: {}). Cleaning up...",
+                eligibleUsers.size(), unverifiedCleanupDays, cutoff);
+
+        for (User user : eligibleUsers) {
+            deletedUserIds.add(user.getId());
             emailVerificationTokenRepository.deleteByUser(user);
             refreshTokenRepository.deleteByUser(user);
             userRepository.delete(user);
         }
         userRepository.flush();
-        log.info("Finished cleaning up {} unverified local user accounts", expiredUsers.size());
-        return expiredUsers.size();
+
+        log.info("Finished cleaning up {} unverified local user accounts (user IDs: {})",
+                deletedUserIds.size(), deletedUserIds);
+        return deletedUserIds.size();
+    }
+
+    private String maskEmail(String email) {
+        if (email == null || email.isBlank()) {
+            return "***";
+        }
+        int atIndex = email.indexOf('@');
+        if (atIndex < 0) {
+            return email.charAt(0) + "***";
+        }
+        if (atIndex == 0) {
+            return "***" + email.substring(atIndex);
+        }
+        return email.charAt(0) + "***" + email.substring(atIndex);
     }
 }

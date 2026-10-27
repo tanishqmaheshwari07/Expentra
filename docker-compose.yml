@@ -13,6 +13,7 @@ services:
       DB_USERNAME: postgres
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your local environment}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in your local environment}
+      OAUTH2_COOKIE_SECRET: ${OAUTH2_COOKIE_SECRET:?Set OAUTH2_COOKIE_SECRET in your local environment}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
     depends_on:

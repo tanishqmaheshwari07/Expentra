@@ -458,8 +458,11 @@ class UserServiceTest {
     }
 
     @Test
-    @DisplayName("cleanupUnverifiedUsers deletes unverified local accounts and associated tokens older than retention period")
+    @DisplayName("cleanupUnverifiedUsers deletes unverified local accounts and associated tokens when enabled=true and dryRun=false")
     void cleanupUnverifiedUsers_DeletesExpiredUnverifiedLocalUsers() {
+        userService.setUnverifiedCleanupEnabled(true);
+        userService.setUnverifiedCleanupDryRun(false);
+
         User unverifiedUser = User.builder()
                 .id(99L)
                 .name("Unverified Old")
@@ -468,7 +471,7 @@ class UserServiceTest {
                 .emailVerified(false)
                 .build();
 
-        when(userRepository.findByAuthProviderAndEmailVerifiedFalseAndCreatedAtBefore(eq(AuthProvider.LOCAL), any(java.time.LocalDateTime.class)))
+        when(userRepository.findStaleUnverifiedWithoutExpenses(eq(AuthProvider.LOCAL), any(java.time.LocalDateTime.class)))
                 .thenReturn(List.of(unverifiedUser));
 
         int deletedCount = userService.cleanupUnverifiedUsers();
@@ -478,5 +481,42 @@ class UserServiceTest {
         verify(refreshTokenRepository, times(1)).deleteByUser(unverifiedUser);
         verify(userRepository, times(1)).delete(unverifiedUser);
         verify(userRepository, times(1)).flush();
+    }
+
+    @Test
+    @DisplayName("cleanupUnverifiedUsers returns immediately and logs when enabled=false")
+    void cleanupUnverifiedUsers_WhenDisabled_DeletesNothing() {
+        userService.setUnverifiedCleanupEnabled(false);
+
+        int deletedCount = userService.cleanupUnverifiedUsers();
+
+        assertThat(deletedCount).isEqualTo(0);
+        verify(userRepository, never()).findStaleUnverifiedWithoutExpenses(any(), any());
+        verify(userRepository, never()).delete(any());
+    }
+
+    @Test
+    @DisplayName("cleanupUnverifiedUsers logs masked email and deletes nothing when dryRun=true")
+    void cleanupUnverifiedUsers_WhenDryRun_DeletesNothing() {
+        userService.setUnverifiedCleanupEnabled(true);
+        userService.setUnverifiedCleanupDryRun(true);
+
+        User unverifiedUser = User.builder()
+                .id(101L)
+                .name("Dry Run User")
+                .email("sensitive.person@example.com")
+                .authProvider(AuthProvider.LOCAL)
+                .emailVerified(false)
+                .build();
+
+        when(userRepository.findStaleUnverifiedWithoutExpenses(eq(AuthProvider.LOCAL), any(java.time.LocalDateTime.class)))
+                .thenReturn(List.of(unverifiedUser));
+
+        int deletedCount = userService.cleanupUnverifiedUsers();
+
+        assertThat(deletedCount).isEqualTo(0);
+        verify(emailVerificationTokenRepository, never()).deleteByUser(any());
+        verify(refreshTokenRepository, never()).deleteByUser(any());
+        verify(userRepository, never()).delete(any());
     }
 }
