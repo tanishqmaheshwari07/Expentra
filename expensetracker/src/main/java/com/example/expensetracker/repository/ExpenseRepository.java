@@ -49,4 +49,11 @@ public interface ExpenseRepository extends JpaRepository<Expense, Long> {
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate
     );
+
+    /**
+     * Checks if any expense row exists for the given user ID, including soft-deleted expenses.
+     * Uses a native EXISTS query on the expenses table to bypass Hibernate's @SQLRestriction("is_deleted = false").
+     */
+    @Query(value = "SELECT EXISTS(SELECT 1 FROM expenses WHERE user_id = :userId)", nativeQuery = true)
+    boolean existsByUserIdIncludingDeleted(@Param("userId") Long userId);
 }

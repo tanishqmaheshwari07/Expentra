@@ -6,9 +6,14 @@ import com.example.expensetracker.dto.ApiResponse;
 import com.example.expensetracker.dto.AuthResponse;
 import com.example.expensetracker.dto.OAuth2ExchangeRequest;
 import com.example.expensetracker.entity.AuthProvider;
+import com.example.expensetracker.entity.Category;
+import com.example.expensetracker.entity.EmailVerificationToken;
+import com.example.expensetracker.entity.Expense;
+import com.example.expensetracker.entity.RefreshToken;
 import com.example.expensetracker.entity.Role;
 import com.example.expensetracker.entity.User;
 import com.example.expensetracker.repository.EmailVerificationTokenRepository;
+import com.example.expensetracker.repository.ExpenseRepository;
 import com.example.expensetracker.repository.OAuthExchangeCodeRepository;
 import com.example.expensetracker.repository.RefreshTokenRepository;
 import com.example.expensetracker.repository.UserRepository;
@@ -21,6 +26,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -39,7 +45,9 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -87,6 +95,9 @@ class OAuth2FullFlowIntegrationTest {
     private EmailVerificationTokenRepository emailVerificationTokenRepository;
 
     @Autowired
+    private ExpenseRepository expenseRepository;
+
+    @Autowired
     private OAuthExchangeCodeRepository exchangeCodeRepository;
 
     @Autowired
@@ -104,6 +115,9 @@ class OAuth2FullFlowIntegrationTest {
     @Autowired
     private OAuth2AuthenticationFailureHandler failureHandler;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     private User activeGoogleUser;
     private User disabledGoogleUser;
 
@@ -112,6 +126,7 @@ class OAuth2FullFlowIntegrationTest {
         exchangeCodeRepository.deleteAll();
         refreshTokenRepository.deleteAll();
         emailVerificationTokenRepository.deleteAll();
+        jdbcTemplate.execute("DELETE FROM expenses");
         userRepository.deleteAll();
 
         activeGoogleUser = userRepository.save(User.builder()
@@ -333,7 +348,7 @@ class OAuth2FullFlowIntegrationTest {
     @DisplayName("Scenario 7a: Verified LOCAL account conflicts with incoming Google login")
     void processOAuth2User_VerifiedLocalAccount_ThrowsAccountConflict() {
         String email = "verified.local@example.com";
-        userRepository.save(User.builder()
+        User verifiedUser = userRepository.save(User.builder()
                 .name("Verified Local Holder")
                 .email(email)
                 .password("hash123")
@@ -356,12 +371,18 @@ class OAuth2FullFlowIntegrationTest {
 
         assertThatThrownBy(() -> customOAuth2UserService.processOAuth2User(oAuth2User))
                 .isInstanceOf(OAuth2AuthenticationException.class)
+                .satisfies(ex -> {
+                    OAuth2AuthenticationException oauthEx = (OAuth2AuthenticationException) ex;
+                    assertThat(oauthEx.getError().getErrorCode()).isEqualTo("account_conflict");
+                })
                 .hasMessageContaining("already exists");
+
+        assertThat(userRepository.findById(verifiedUser.getId())).isPresent();
     }
 
     @Test
-    @DisplayName("Scenario 7b: Unverified LOCAL account is deleted and replaced by verified Google user")
-    void processOAuth2User_UnverifiedLocalAccount_ReplacedByGoogleUser() {
+    @DisplayName("Scenario 7b: Unverified LOCAL user with NO expenses is replaced by Google user and tokens deleted")
+    void processOAuth2User_UnverifiedLocalAccount_NoExpenses_ReplacedByGoogleUser() {
         String email = "unverified.local@example.com";
         User unverifiedLocal = userRepository.save(User.builder()
                 .name("Unverified Local Holder")
@@ -370,6 +391,21 @@ class OAuth2FullFlowIntegrationTest {
                 .authProvider(AuthProvider.LOCAL)
                 .emailVerified(false)
                 .isActive(true)
+                .build());
+
+        emailVerificationTokenRepository.save(EmailVerificationToken.builder()
+                .user(unverifiedLocal)
+                .tokenHash("token-hash-scenario7b")
+                .expiresAt(Instant.now().plusSeconds(3600))
+                .createdAt(Instant.now())
+                .used(false)
+                .build());
+
+        refreshTokenRepository.save(RefreshToken.builder()
+                .user(unverifiedLocal)
+                .token("refresh-token-scenario7b")
+                .expiryDate(Instant.now().plusSeconds(86400))
+                .revoked(false)
                 .build());
 
         Map<String, Object> attributes = new HashMap<>();
@@ -395,6 +431,119 @@ class OAuth2FullFlowIntegrationTest {
         User dbUser = userRepository.findByEmail(email).orElseThrow();
         assertThat(dbUser.getAuthProvider()).isEqualTo(AuthProvider.GOOGLE);
         assertThat(dbUser.getId()).isNotEqualTo(unverifiedLocal.getId());
+
+        // Confirm tokens were deleted
+        assertThat(emailVerificationTokenRepository.findByTokenHash("token-hash-scenario7b")).isEmpty();
+        assertThat(refreshTokenRepository.findByToken("refresh-token-scenario7b")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Scenario 7c: Unverified LOCAL user WITH active expense: refused with account_conflict, user and expense still exist")
+    void processOAuth2User_UnverifiedLocalAccount_WithActiveExpense_ThrowsAccountConflict() {
+        String email = "unverified.active-expense@example.com";
+        User unverifiedUser = userRepository.save(User.builder()
+                .name("Unverified Active Expense")
+                .email(email)
+                .password("hash789")
+                .authProvider(AuthProvider.LOCAL)
+                .emailVerified(false)
+                .isActive(true)
+                .build());
+
+        Expense expense = expenseRepository.save(Expense.builder()
+                .user(unverifiedUser)
+                .amount(new BigDecimal("100.00"))
+                .description("Active Expense")
+                .category(Category.FOOD)
+                .date(LocalDate.now())
+                .isDeleted(false)
+                .build());
+
+        Map<String, Object> attributes = new HashMap<>();
+        attributes.put("sub", "google-sub-active-expense");
+        attributes.put("email", email);
+        attributes.put("name", "Google Incoming User");
+        attributes.put("email_verified", true);
+
+        OAuth2User oAuth2User = new DefaultOAuth2User(
+                Collections.emptyList(),
+                attributes,
+                "email"
+        );
+
+        assertThatThrownBy(() -> customOAuth2UserService.processOAuth2User(oAuth2User))
+                .isInstanceOf(OAuth2AuthenticationException.class)
+                .satisfies(ex -> {
+                    OAuth2AuthenticationException oauthEx = (OAuth2AuthenticationException) ex;
+                    assertThat(oauthEx.getError().getErrorCode()).isEqualTo("account_conflict");
+                })
+                .hasMessageContaining("already exists");
+
+        // Verify user and expense still exist
+        assertThat(userRepository.findById(unverifiedUser.getId())).isPresent();
+        assertThat(expenseRepository.findById(expense.getId())).isPresent();
+    }
+
+    @Test
+    @DisplayName("Scenario 7d: Unverified LOCAL user WITH soft-deleted expense: refused with account_conflict, nothing deleted")
+    void processOAuth2User_UnverifiedLocalAccount_WithSoftDeletedExpense_ThrowsAccountConflict() {
+        String email = "unverified.soft-deleted-expense@example.com";
+        User unverifiedUser = userRepository.save(User.builder()
+                .name("Unverified Soft Expense")
+                .email(email)
+                .password("hash999")
+                .authProvider(AuthProvider.LOCAL)
+                .emailVerified(false)
+                .isActive(true)
+                .build());
+
+        Expense expense = expenseRepository.save(Expense.builder()
+                .user(unverifiedUser)
+                .amount(new BigDecimal("50.00"))
+                .description("Soft Deleted Expense")
+                .category(Category.ENTERTAINMENT)
+                .date(LocalDate.now())
+                .isDeleted(false)
+                .build());
+
+        jdbcTemplate.update("UPDATE expenses SET is_deleted = true WHERE id = ?", expense.getId());
+
+        // Verify native table has the soft-deleted expense
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM expenses WHERE user_id = ? AND is_deleted = true",
+                Integer.class,
+                unverifiedUser.getId()
+        );
+        assertThat(count).isEqualTo(1);
+
+        Map<String, Object> attributes = new HashMap<>();
+        attributes.put("sub", "google-sub-soft-deleted");
+        attributes.put("email", email);
+        attributes.put("name", "Google Incoming User");
+        attributes.put("email_verified", true);
+
+        OAuth2User oAuth2User = new DefaultOAuth2User(
+                Collections.emptyList(),
+                attributes,
+                "email"
+        );
+
+        assertThatThrownBy(() -> customOAuth2UserService.processOAuth2User(oAuth2User))
+                .isInstanceOf(OAuth2AuthenticationException.class)
+                .satisfies(ex -> {
+                    OAuth2AuthenticationException oauthEx = (OAuth2AuthenticationException) ex;
+                    assertThat(oauthEx.getError().getErrorCode()).isEqualTo("account_conflict");
+                })
+                .hasMessageContaining("already exists");
+
+        // Verify user and soft-deleted expense still exist
+        assertThat(userRepository.findById(unverifiedUser.getId())).isPresent();
+        Integer remainingCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM expenses WHERE id = ?",
+                Integer.class,
+                expense.getId()
+        );
+        assertThat(remainingCount).isEqualTo(1);
     }
 
     // -------------------------------------------------------------------------

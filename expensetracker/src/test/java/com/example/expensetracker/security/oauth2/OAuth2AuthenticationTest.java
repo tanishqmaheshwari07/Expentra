@@ -5,6 +5,7 @@ import com.example.expensetracker.entity.AuthProvider;
 import com.example.expensetracker.entity.Role;
 import com.example.expensetracker.entity.User;
 import com.example.expensetracker.repository.EmailVerificationTokenRepository;
+import com.example.expensetracker.repository.ExpenseRepository;
 import com.example.expensetracker.repository.OAuthExchangeCodeRepository;
 import com.example.expensetracker.repository.RefreshTokenRepository;
 import com.example.expensetracker.repository.UserRepository;
@@ -58,6 +59,9 @@ class OAuth2AuthenticationTest {
 
     @Mock
     private EmailVerificationTokenRepository emailVerificationTokenRepository;
+
+    @Mock
+    private ExpenseRepository expenseRepository;
 
     @Mock
     private OAuth2Properties oAuth2Properties;
@@ -267,6 +271,8 @@ class OAuth2AuthenticationTest {
                 .thenReturn(Optional.empty());
         when(userRepository.findByEmail("unverified-local@example.com"))
                 .thenReturn(Optional.of(unverifiedLocalUser));
+        when(expenseRepository.existsByUserIdIncludingDeleted(22L))
+                .thenReturn(false);
 
         User savedGoogleUser = User.builder()
                 .id(33L)
@@ -292,6 +298,50 @@ class OAuth2AuthenticationTest {
         verify(userRepository, times(1)).delete(unverifiedLocalUser);
         verify(userRepository, times(1)).flush();
         verify(userRepository, times(1)).save(any(User.class));
+    }
+
+    @Test
+    @DisplayName("3c. Existing unverified LOCAL account that owns expenses - refuses with account_conflict and deletes nothing")
+    void processOAuth2User_ExistingUnverifiedLocalAccountWithExpenses_ThrowsAccountConflict() {
+        Map<String, Object> attributes = new HashMap<>();
+        attributes.put("sub", "google-sub-88888");
+        attributes.put("email", "unverified-with-expenses@example.com");
+        attributes.put("name", "Google Real User");
+        attributes.put("email_verified", true);
+
+        OAuth2User oAuth2User = new DefaultOAuth2User(
+                Collections.emptyList(),
+                attributes,
+                "email"
+        );
+
+        User unverifiedUserWithExpenses = User.builder()
+                .id(55L)
+                .name("User With Expenses")
+                .email("unverified-with-expenses@example.com")
+                .password("somePasswordHash")
+                .authProvider(AuthProvider.LOCAL)
+                .providerId(null)
+                .role(Role.ROLE_USER)
+                .isActive(true)
+                .emailVerified(false)
+                .build();
+
+        when(userRepository.findByAuthProviderAndProviderId(AuthProvider.GOOGLE, "google-sub-88888"))
+                .thenReturn(Optional.empty());
+        when(userRepository.findByEmail("unverified-with-expenses@example.com"))
+                .thenReturn(Optional.of(unverifiedUserWithExpenses));
+        when(expenseRepository.existsByUserIdIncludingDeleted(55L))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> customOAuth2UserService.processOAuth2User(oAuth2User))
+                .isInstanceOf(OAuth2AuthenticationException.class)
+                .hasMessageContaining("already exists");
+
+        verify(emailVerificationTokenRepository, never()).deleteByUser(any());
+        verify(refreshTokenRepository, never()).deleteByUser(any());
+        verify(userRepository, never()).delete(any());
+        verify(userRepository, never()).save(any(User.class));
     }
 
     @Test

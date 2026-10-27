@@ -4,6 +4,7 @@ import com.example.expensetracker.entity.AuthProvider;
 import com.example.expensetracker.entity.Role;
 import com.example.expensetracker.entity.User;
 import com.example.expensetracker.repository.EmailVerificationTokenRepository;
+import com.example.expensetracker.repository.ExpenseRepository;
 import com.example.expensetracker.repository.RefreshTokenRepository;
 import com.example.expensetracker.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,7 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final EmailVerificationTokenRepository emailVerificationTokenRepository;
+    private final ExpenseRepository expenseRepository;
 
     @Override
     @Transactional
@@ -65,7 +67,7 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
         Optional<User> existingGoogleUser = userRepository.findByAuthProviderAndProviderId(AuthProvider.GOOGLE, sub);
         if (existingGoogleUser.isPresent()) {
             User user = existingGoogleUser.get();
-            log.info("Found existing Google user with ID: {} for email: {}", user.getId(), normalizedEmail);
+            log.info("Found existing Google user with ID: {}", user.getId());
             return new CustomOAuth2User(user, attributes);
         }
 
@@ -77,16 +79,18 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
             boolean isGoogleEmailVerified = Boolean.TRUE.equals(emailVerifiedClaim)
                     || (emailVerifiedClaim instanceof String s && "true".equalsIgnoreCase(s.trim()));
 
-            // Step 6: If existing account is LOCAL and unverified, and Google email is verified, replace with Google user
-            if (existingUser.getAuthProvider() == AuthProvider.LOCAL && !existingUser.isEmailVerified() && isGoogleEmailVerified) {
-                log.info("Resolving account conflict: Unverified LOCAL account exists for '{}', but Google email is verified. Deleting unverified account and provisioning Google user.", normalizedEmail);
+            boolean hasExpenses = expenseRepository.existsByUserIdIncludingDeleted(existingUser.getId());
+
+            // If existing account is LOCAL and unverified, Google email is verified, and user owns NO expenses (including soft-deleted)
+            if (existingUser.getAuthProvider() == AuthProvider.LOCAL && !existingUser.isEmailVerified() && isGoogleEmailVerified && !hasExpenses) {
+                log.info("Resolving account conflict: Unverified LOCAL account (ID: {}) has zero expenses and Google email is verified. Deleting unverified account and provisioning Google user.", existingUser.getId());
                 emailVerificationTokenRepository.deleteByUser(existingUser);
                 refreshTokenRepository.deleteByUser(existingUser);
                 userRepository.delete(existingUser);
                 userRepository.flush();
             } else {
-                log.warn("Account conflict detected for email '{}'. Account exists with provider: {}",
-                        normalizedEmail, existingUser.getAuthProvider());
+                log.warn("Account conflict detected for user ID: {}. Existing account provider: {}, hasExpenses: {}",
+                        existingUser.getId(), existingUser.getAuthProvider(), hasExpenses);
                 throw new OAuth2AuthenticationException(
                         new OAuth2Error("account_conflict"),
                         "An account with email " + normalizedEmail + " already exists. Please sign in with your email and password."
@@ -107,7 +111,7 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
                 .build();
 
         User savedUser = userRepository.save(newUser);
-        log.info("Successfully registered new Google OAuth user with ID: {} and email: {}", savedUser.getId(), normalizedEmail);
+        log.info("Successfully registered new Google OAuth user with ID: {}", savedUser.getId());
         return new CustomOAuth2User(savedUser, attributes);
     }
 }
