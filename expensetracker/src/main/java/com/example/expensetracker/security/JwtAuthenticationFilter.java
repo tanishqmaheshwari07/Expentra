@@ -1,6 +1,7 @@
 package com.example.expensetracker.security;
 
 import com.example.expensetracker.service.JwtService;
+import com.example.expensetracker.util.MaskUtils;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -60,7 +61,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     );
 
                     SecurityContextHolder.getContext().setAuthentication(authentication);
-                    log.debug("[JWT FILTER] Authenticated user '{}' with role '{}'", email, role);
+                    log.debug("[JWT FILTER] Authenticated user '{}' with role '{}'", MaskUtils.maskEmail(email), role);
                 }
             }
         } catch (Exception e) {

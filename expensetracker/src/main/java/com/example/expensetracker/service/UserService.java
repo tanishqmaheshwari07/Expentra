@@ -23,6 +23,7 @@ import com.example.expensetracker.repository.EmailVerificationTokenRepository;
 import com.example.expensetracker.repository.RefreshTokenRepository;
 import com.example.expensetracker.repository.UserRepository;
 import com.example.expensetracker.security.oauth2.OAuth2ExchangeCodeService;
+import com.example.expensetracker.util.MaskUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -129,7 +130,7 @@ public class UserService {
         String accessToken = jwtService.generateAccessToken(user.getEmail(), user.getRole());
         RefreshToken refreshToken = createRefreshToken(user);
 
-        log.info("User '{}' logged in successfully", user.getEmail());
+        log.info("User ID: {} logged in successfully", user.getId());
 
         return AuthResponse.builder()
                 .accessToken(accessToken)
@@ -153,19 +154,19 @@ public class UserService {
         Optional<User> userOptional = userRepository.findByEmail(normalizedEmail);
 
         if (userOptional.isEmpty()) {
-            log.info("Resend verification requested for non-existent email '{}'. Silently ignoring to prevent enumeration.", normalizedEmail);
+            log.info("Resend verification requested for non-existent email '{}'. Silently ignoring to prevent enumeration.", maskEmail(normalizedEmail));
             return;
         }
 
         User user = userOptional.get();
 
         if (user.getAuthProvider() != AuthProvider.LOCAL) {
-            log.info("Resend verification requested for non-local OAuth user '{}'. Ignoring.", normalizedEmail);
+            log.info("Resend verification requested for non-local OAuth user ID: {}. Ignoring.", user.getId());
             return;
         }
 
         if (user.isEmailVerified()) {
-            log.info("Resend verification requested for already-verified user '{}'. Ignoring.", normalizedEmail);
+            log.info("Resend verification requested for already-verified user ID: {}. Ignoring.", user.getId());
             return;
         }
 
@@ -201,7 +202,7 @@ public class UserService {
         String accessToken = jwtService.generateAccessToken(user.getEmail(), user.getRole());
         RefreshToken refreshToken = createRefreshToken(user);
 
-        log.info("OAuth2 exchange code consumed successfully for user '{}'", user.getEmail());
+        log.info("OAuth2 exchange code consumed successfully for user ID: {}", user.getId());
 
         return AuthResponse.builder()
                 .accessToken(accessToken)
@@ -236,7 +237,7 @@ public class UserService {
         token.setExpiryDate(Instant.now().plusMillis(jwtProperties.getRefreshTokenExpirationMs()));
         RefreshToken rotatedToken = refreshTokenRepository.save(token);
 
-        log.info("Rotated refresh token for user '{}'", user.getEmail());
+        log.info("Rotated refresh token for user ID: {}", user.getId());
 
         return AuthResponse.builder()
                 .accessToken(newAccessToken)
@@ -251,7 +252,7 @@ public class UserService {
         if (tokenString != null && !tokenString.isBlank()) {
             refreshTokenRepository.findByToken(tokenString).ifPresent(token -> {
                 refreshTokenRepository.delete(token);
-                log.info("Revoked refresh token for user '{}'", token.getUser().getEmail());
+                log.info("Revoked refresh token for user ID: {}", token.getUser().getId());
             });
         }
     }
@@ -448,16 +449,6 @@ public class UserService {
     }
 
     private String maskEmail(String email) {
-        if (email == null || email.isBlank()) {
-            return "***";
-        }
-        int atIndex = email.indexOf('@');
-        if (atIndex < 0) {
-            return email.charAt(0) + "***";
-        }
-        if (atIndex == 0) {
-            return "***" + email.substring(atIndex);
-        }
-        return email.charAt(0) + "***" + email.substring(atIndex);
+        return MaskUtils.maskEmail(email);
     }
 }

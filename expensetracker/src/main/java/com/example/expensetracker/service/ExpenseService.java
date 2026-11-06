@@ -47,7 +47,7 @@ public class ExpenseService {
                 .build();
 
         Expense savedExpense = expenseRepository.save(expense);
-        log.info("User '{}' created expense ID: {}", currentUser.getEmail(), savedExpense.getId());
+        log.info("User ID: {} created expense ID: {}", currentUser.getId(), savedExpense.getId());
         return ExpenseMapper.toResponse(savedExpense);
     }
 
@@ -77,7 +77,7 @@ public class ExpenseService {
         expense.setDate(request.getDate());
 
         Expense updatedExpense = expenseRepository.save(expense);
-        log.info("User '{}' updated expense ID: {}", currentUser.getEmail(), updatedExpense.getId());
+        log.info("User ID: {} updated expense ID: {}", currentUser.getId(), updatedExpense.getId());
         return ExpenseMapper.toResponse(updatedExpense);
     }
 
@@ -90,7 +90,7 @@ public class ExpenseService {
                 ));
 
         expenseRepository.delete(expense);
-        log.info("User '{}' soft-deleted expense ID: {}", currentUser.getEmail(), expenseId);
+        log.info("User ID: {} soft-deleted expense ID: {}", currentUser.getId(), expenseId);
     }
 
     @Transactional(readOnly = true)

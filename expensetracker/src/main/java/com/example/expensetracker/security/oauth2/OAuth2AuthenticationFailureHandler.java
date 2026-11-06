@@ -58,7 +58,7 @@ public class OAuth2AuthenticationFailureHandler implements AuthenticationFailure
             }
         }
 
-        log.warn("OAuth2 authentication failure: {} (Error code mapped to: {})", exception.getMessage(), errorCode);
+        log.warn("OAuth2 authentication failure: error_code={}", errorCode);
 
         String targetUrl = UriComponentsBuilder
                 .fromUriString(oAuth2Properties.getFailureRedirectUri())

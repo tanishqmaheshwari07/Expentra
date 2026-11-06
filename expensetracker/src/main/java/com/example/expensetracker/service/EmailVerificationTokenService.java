@@ -104,7 +104,7 @@ public class EmailVerificationTokenService {
         user.setEmailVerified(true);
         User savedUser = userRepository.save(user);
 
-        log.info("Successfully verified email for user ID: {} ('{}')", savedUser.getId(), savedUser.getEmail());
+        log.info("Successfully verified email for user ID: {}", savedUser.getId());
         return savedUser;
     }
 

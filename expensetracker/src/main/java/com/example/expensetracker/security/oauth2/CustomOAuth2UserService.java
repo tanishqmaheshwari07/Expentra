@@ -93,7 +93,7 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
                         existingUser.getId(), existingUser.getAuthProvider(), hasExpenses);
                 throw new OAuth2AuthenticationException(
                         new OAuth2Error("account_conflict"),
-                        "An account with email " + normalizedEmail + " already exists. Please sign in with your email and password."
+                        "An account with this email already exists. Please sign in with your email and password."
                 );
             }
         }

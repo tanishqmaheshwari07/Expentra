@@ -60,7 +60,7 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
 
         if (user != null) {
             if (!user.isActive()) {
-                log.warn("OAuth login rejected: Account is disabled for email '{}'", user.getEmail());
+                log.warn("OAuth login rejected: Account is disabled for user ID: {}", user.getId());
                 String redirectUrl = UriComponentsBuilder
                         .fromUriString(oAuth2Properties.getFailureRedirectUri())
                         .replaceQueryParam("error", "account_disabled")
@@ -101,7 +101,7 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
                     .build()
                     .toUriString();
 
-            log.info("OAuth2/OIDC authentication successful for user '{}'. Redirecting with one-time exchange code.", user.getEmail());
+            log.info("OAuth2/OIDC authentication successful for user ID: {}. Redirecting with one-time exchange code.", user.getId());
             response.sendRedirect(targetUrl);
         } else {
             log.error("Unexpected principal type in OAuth2 authentication success: {}",

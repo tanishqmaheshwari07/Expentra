@@ -1,6 +1,7 @@
 package com.example.expensetracker.service;
 
 import com.example.expensetracker.config.EmailVerificationProperties;
+import com.example.expensetracker.util.MaskUtils;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
@@ -47,12 +48,12 @@ public class EmailService {
             helper.setText(htmlContent, true);
 
             mailSender.send(message);
-            log.info("Verification email successfully sent to '{}'", toEmail);
+            log.info("Verification email successfully sent to '{}'", MaskUtils.maskEmail(toEmail));
         } catch (MessagingException e) {
-            log.error("Failed to compose or send verification email to '{}'", toEmail, e);
+            log.error("Failed to compose or send verification email to '{}'", MaskUtils.maskEmail(toEmail), e);
             throw new RuntimeException("Failed to send verification email. Please try again later.", e);
         } catch (Exception e) {
-            log.error("Unexpected error sending verification email to '{}'", toEmail, e);
+            log.error("Unexpected error sending verification email to '{}'", MaskUtils.maskEmail(toEmail), e);
             throw new RuntimeException("Failed to send verification email. Please try again later.", e);
         }
     }

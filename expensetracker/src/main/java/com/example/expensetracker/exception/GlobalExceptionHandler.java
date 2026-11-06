@@ -29,7 +29,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(UserNotFoundException.class)
     public ResponseEntity<ApiResponse<Void>> handleUserNotFound(UserNotFoundException ex) {
-        log.warn("User not found: {}", ex.getMessage());
+        log.warn("User not found");
         return ResponseEntity
                 .status(HttpStatus.NOT_FOUND)
                 .body(ApiResponse.error(ex.getMessage()));
@@ -61,7 +61,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BadCredentialsException.class)
     public ResponseEntity<ApiResponse<Void>> handleBadCredentials(BadCredentialsException ex) {
-        log.warn("Bad credentials attempt: {}", ex.getMessage());
+        log.warn("Bad credentials attempt");
         String msg = (ex.getMessage() != null && !ex.getMessage().isBlank())
                 ? ex.getMessage()
                 : "Invalid email or password";
@@ -72,7 +72,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(UserAlreadyExistsException.class)
     public ResponseEntity<ApiResponse<Void>> handleUserAlreadyExists(UserAlreadyExistsException ex) {
-        log.warn("User already exists conflict: {}", ex.getMessage());
+        log.warn("User already exists conflict");
         return ResponseEntity
                 .status(HttpStatus.CONFLICT)
                 .body(ApiResponse.error(ex.getMessage()));
@@ -109,7 +109,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(EmailNotVerifiedException.class)
     public ResponseEntity<ApiResponse<Void>> handleEmailNotVerified(EmailNotVerifiedException ex) {
-        log.warn("Email not verified login attempt: {}", ex.getMessage());
+        log.warn("Email not verified login attempt");
         return ResponseEntity
                 .status(HttpStatus.FORBIDDEN)
                 .body(ApiResponse.error(ex.getMessage()));
@@ -117,7 +117,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(InvalidVerificationTokenException.class)
     public ResponseEntity<ApiResponse<Void>> handleInvalidVerificationToken(InvalidVerificationTokenException ex) {
-        log.warn("Invalid email verification token: {}", ex.getMessage());
+        log.warn("Invalid email verification token");
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .body(ApiResponse.error(ex.getMessage()));
