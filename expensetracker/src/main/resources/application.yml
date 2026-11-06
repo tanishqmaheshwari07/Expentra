@@ -6,7 +6,7 @@ spring:
   datasource:
     url: ${DB_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:expense_tracker}}
     username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:shanvi007pos}
+    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 10
@@ -97,7 +97,7 @@ application:
   # JWT Security
   security:
     jwt:
-      secret-key: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
+      secret-key: ${JWT_SECRET}
       access-token-expiration-ms: ${JWT_ACCESS_EXPIRATION_MS:900000}
       refresh-token-expiration-ms: ${JWT_REFRESH_EXPIRATION_MS:604800000}
       cookie-secure: ${COOKIE_SECURE:false}

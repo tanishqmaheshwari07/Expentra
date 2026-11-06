@@ -288,8 +288,9 @@ $env:DB_NAME="expense_tracker"
 $env:DB_USERNAME="postgres"
 $env:DB_PASSWORD="your_postgres_password"
 
-# Generate a strong 64-hex-char JWT Secret or provide your own
-$env:JWT_SECRET="404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970"
+# Required Secrets (minimum 32 characters for HMAC signing keys)
+$env:JWT_SECRET="your_secure_jwt_signing_secret_at_least_32_chars"
+$env:OAUTH2_COOKIE_SECRET="your_secure_oauth2_cookie_secret_32_chars"
 
 # Optional: Google OAuth2 Credentials (required for Google Login button)
 $env:GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com"
@@ -325,6 +326,24 @@ Open your browser and navigate to **[http://localhost:3000](http://localhost:300
 
 The application reads its configuration from system environment variables with sensible defaults defined in `application.yml` and `vite.config.ts`.
 
+### Required Environment Variables
+
+The following environment variables have **no default values** and are strictly required. The backend application will fail fast at startup if any are missing or invalid:
+
+- `DB_PASSWORD`
+- `JWT_SECRET` (minimum 32 characters)
+- `OAUTH2_COOKIE_SECRET` (minimum 32 characters)
+
+#### PowerShell Example (Local Development)
+
+```powershell
+$env:DB_PASSWORD="your_postgres_password"
+$env:JWT_SECRET="your_secure_jwt_signing_secret_at_least_32_chars"
+$env:OAUTH2_COOKIE_SECRET="your_secure_oauth2_cookie_secret_32_chars"
+```
+
+### Complete Environment Variables Reference
+
 | Variable | Description | Default / Example | Required |
 | :--- | :--- | :--- | :---: |
 | `DB_HOST` | Hostname of the PostgreSQL database | `localhost` | No |
@@ -332,7 +351,8 @@ The application reads its configuration from system environment variables with s
 | `DB_NAME` | Name of the database | `expense_tracker` | No |
 | `DB_USERNAME` | PostgreSQL username | `postgres` | No |
 | `DB_PASSWORD` | PostgreSQL password | *None* | **Yes** |
-| `JWT_SECRET` | 256-bit hexadecimal string for HMAC-SHA signing | `404E6352...` *(Change in prod)* | **Yes** |
+| `JWT_SECRET` | 256-bit key for HMAC-SHA signing (min 32 chars) | *None* | **Yes** |
+| `OAUTH2_COOKIE_SECRET` | Secret for HMAC signing OAuth cookies (min 32 chars) | *None* | **Yes** |
 | `JWT_ACCESS_EXPIRATION_MS` | Access token lifespan in milliseconds | `900000` (15 minutes) | No |
 | `JWT_REFRESH_EXPIRATION_MS`| Refresh token lifespan in milliseconds | `604800000` (7 days) | No |
 | `COOKIE_SECURE` | Set `true` in production to enforce HTTPS cookie delivery | `false` | No |

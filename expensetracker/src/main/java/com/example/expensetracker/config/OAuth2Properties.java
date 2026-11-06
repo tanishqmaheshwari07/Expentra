@@ -1,13 +1,17 @@
 package com.example.expensetracker.config;
 
 import jakarta.annotation.PostConstruct;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.validation.annotation.Validated;
 
 @Configuration
 @ConfigurationProperties(prefix = "application.oauth2")
+@Validated
 @Getter
 @Setter
 public class OAuth2Properties {
@@ -29,14 +33,19 @@ public class OAuth2Properties {
 
     /**
      * Secret key for HMAC signing of OAuth2 authorization request cookies.
-     * Must have NO default value in production.
+     * Must have NO default value in production and at least 32 characters.
      */
+    @NotBlank(message = "application.oauth2.cookie-secret (OAUTH2_COOKIE_SECRET) must not be blank")
+    @Size(min = 32, message = "application.oauth2.cookie-secret (OAUTH2_COOKIE_SECRET) must be at least 32 characters")
     private String cookieSecret;
 
     @PostConstruct
     public void validateProperties() {
         if (cookieSecret == null || cookieSecret.isBlank()) {
             throw new IllegalStateException("OAuth2 cookieSecret must be configured (has NO default value)");
+        }
+        if (cookieSecret.length() < 32) {
+            throw new IllegalStateException("OAuth2 cookieSecret must be at least 32 characters");
         }
     }
 }

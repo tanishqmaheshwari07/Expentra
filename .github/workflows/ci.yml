@@ -9,6 +9,10 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    env:
+      DB_PASSWORD: fake-ci-test-db-password-not-real
+      JWT_SECRET: fake-ci-test-jwt-secret-key-at-least-32-chars-long
+      OAUTH2_COOKIE_SECRET: fake-ci-test-oauth2-cookie-secret-32-chars-long
 
     steps:
       - name: Checkout Code

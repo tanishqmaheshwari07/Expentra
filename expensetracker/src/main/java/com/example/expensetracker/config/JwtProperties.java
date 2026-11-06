@@ -1,20 +1,27 @@
 package com.example.expensetracker.config;
 
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.validation.annotation.Validated;
 
 @Configuration
 @ConfigurationProperties(prefix = "application.security.jwt")
+@Validated
 @Getter
 @Setter
 public class JwtProperties {
 
     /**
      * Secret key for signing JWT tokens (HMAC-SHA256, minimum 256 bits / 32 chars).
+     * Must be provided via JWT_SECRET environment variable; no default value.
      */
-    private String secretKey = "404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970";
+    @NotBlank(message = "application.security.jwt.secret-key (JWT_SECRET) must not be blank")
+    @Size(min = 32, message = "application.security.jwt.secret-key (JWT_SECRET) must be at least 32 characters")
+    private String secretKey;
 
     /**
      * Access token validity in milliseconds (default: 15 minutes).
