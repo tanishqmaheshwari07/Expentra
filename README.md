@@ -151,7 +151,7 @@ sequenceDiagram
     Backend-->>User: 302 Redirect to Google Consent Screen + Set-Cookie: oauth_binder & oauth2_auth_request
     User->>Google: Authenticate & Grant Consent
     Google->>Backend: Redirect /login/oauth2/code/google with authorization code
-    Backend->>Backend: Restore & verify oauth2_auth_request cookie; clear cookie
+    Backend->>Backend: Restore & verify oauth2_auth_request cookie, then clear cookie
     Backend->>Google: Exchange authorization code for ID & Access Tokens
     Google-->>Backend: Return OIDC ID Token & profile claims
     Note over Backend: CustomOidcUserService validates email_verified is true.<br/>CustomOAuth2UserService enforces account conflict rules.
@@ -168,7 +168,7 @@ sequenceDiagram
     Note over Backend: OAuth2AuthenticationSuccessHandler verifies oauth_binder cookie,<br/>hashes raw code and binder with SHA-256.
     Backend->>DB: Save hashed code row to oauth_exchange_codes (code_hash, binder_hash, 300s TTL)
     Backend-->>User: 302 Redirect http://localhost:3000/oauth2/callback?code={rawCode}
-    User->>Frontend: Load /oauth2/callback route; sanitize URL (history.replaceState)
+    User->>Frontend: Load /oauth2/callback route and sanitize URL (history.replaceState)
     Frontend->>Backend: POST /api/users/oauth2/exchange { code: rawCode } (sends oauth_binder cookie)
     Backend->>DB: Atomically consume code via DELETE ... RETURNING where code_hash = sha256(rawCode)
     Backend->>Backend: Verify SHA-256(oauth_binder) matches stored binder_hash (constant-time)
